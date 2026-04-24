@@ -734,7 +734,9 @@ function App() {
       APPROVED_LOGIN_EMAILS.length > 0 &&
       !APPROVED_LOGIN_EMAILS.includes(normalizedEmail)
     ) {
-      setAuthMessage('This email is not approved yet. Ask an admin to add you first.')
+      setAuthMessage(
+        'Login blocked by VITE_ALLOWED_LOGIN_EMAILS: this email is not on that list. Netlify → Site configuration → Environment variables → add it (comma-separated) or delete the variable to turn the list off.',
+      )
       return
     }
     const { data: canRequest, error: allowError } = await supabase.rpc(
@@ -746,7 +748,9 @@ function App() {
       return
     }
     if (!canRequest) {
-      setAuthMessage('This email is not approved yet. Ask an admin to add you first.')
+      setAuthMessage(
+        'Login blocked by database: no row in user_access for this email. Supabase → Table editor → user_access → New row (email + admin or canvasser). Or run the INSERT from documentation/schema.sql.',
+      )
       return
     }
 
