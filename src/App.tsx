@@ -1,7 +1,15 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import { CircleMarker, MapContainer, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet'
+import {
+  CircleMarker,
+  MapContainer,
+  Marker,
+  Popup,
+  TileLayer,
+  useMap,
+  useMapEvents,
+} from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet-draw'
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon'
@@ -56,10 +64,110 @@ function addressInAssignedGeofences(
   )
 }
 
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000
+  const φ1 = (lat1 * Math.PI) / 180
+  const φ2 = (lat2 * Math.PI) / 180
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180
+  const Δλ = ((lng2 - lng1) * Math.PI) / 180
+  const x =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2)
+  return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x))
+}
+
+function clusterAddressesByProximity(addresses: AddressRow[], maxDistanceM: number): AddressRow[][] {
+  const n = addresses.length
+  if (n === 0) return []
+  const parent = Array.from({ length: n }, (_, i) => i)
+  const find = (i: number): number => {
+    if (parent[i] !== i) parent[i] = find(parent[i])
+    return parent[i]
+  }
+  const union = (a: number, b: number) => {
+    const ra = find(a)
+    const rb = find(b)
+    if (ra !== rb) parent[rb] = ra
+  }
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (
+        haversineMeters(addresses[i].lat, addresses[i].long, addresses[j].lat, addresses[j].long) <=
+        maxDistanceM
+      ) {
+        union(i, j)
+      }
+    }
+  }
+  const buckets = new Map<number, AddressRow[]>()
+  for (let i = 0; i < n; i++) {
+    const r = find(i)
+    if (!buckets.has(r)) buckets.set(r, [])
+    buckets.get(r)!.push(addresses[i])
+  }
+  return [...buckets.values()]
+}
+
+/** Min distance (m) between any point in A and any point in B. */
+function crossClusterMinMeters(a: AddressRow[], b: AddressRow[]): number {
+  let min = Infinity
+  for (const pa of a) {
+    for (const pb of b) {
+      const d = haversineMeters(pa.lat, pa.long, pb.lat, pb.long)
+      if (d < min) min = d
+    }
+  }
+  return min
+}
+
+/**
+ * Merge cluster pairs whose closest points are within maxGapM.
+ * Catches one building split into two graph components when the first pass threshold
+ * is shorter than the gap between wings (first pass only unions pairwise ≤ N m).
+ */
+function mergeClustersByCrossGap(clusters: AddressRow[][], maxGapM: number): AddressRow[][] {
+  const list = clusters.map((c) => [...c])
+  let merged = true
+  while (merged) {
+    merged = false
+    outer: for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const minD = crossClusterMinMeters(list[i], list[j])
+        if (
+          minD <= maxGapM &&
+          (list[i].length >= 2 || list[j].length >= 2)
+        ) {
+          list[i] = [...list[i], ...list[j]]
+          list.splice(j, 1)
+          merged = true
+          break outer
+        }
+      }
+    }
+  }
+  return list
+}
+
+/** New icon per marker — Leaflet must not reuse one DivIcon instance across multiple markers. */
+function createClusterCountIcon(count: number): L.DivIcon {
+  return L.divIcon({
+    className: 'address-cluster-leaflet-marker',
+    html: `<div class="address-cluster-hit" aria-hidden="true"><span class="address-cluster-hit__badge">${count}</span></div>`,
+    iconSize: [44, 44],
+    iconAnchor: [22, 22],
+  })
+}
+
 const RURAL_HALL_CENTER: [number, number] = [36.2413, -80.2937]
 const APP_ROLES = new Set(['admin', 'canvasser'])
 const VIEWPORT_LIMIT = 4000
 const DOTS_VISIBLE_MIN_ZOOM = 15
+/** Canvasser: invisible CircleMarker radius (px) — much larger than the visible dot for finger taps. */
+const CANVASSER_ADDRESS_HIT_RADIUS_PX = 26
+/** First pass: union pairs within this distance (m). */
+const ADDRESS_CLUSTER_MERGE_METERS = 12
+/** Second pass: merge whole clusters if any cross-cluster pair is within this (m). Catches wide footprints. */
+const ADDRESS_CLUSTER_CROSS_GAP_METERS = 22
 const APPROVED_LOGIN_EMAILS = (import.meta.env.VITE_ALLOWED_LOGIN_EMAILS ?? '')
   .split(',')
   .map((email) => email.trim().toLowerCase())
@@ -281,6 +389,96 @@ function GeofenceTrashIcon() {
   )
 }
 
+function NearbyAddressSheet({
+  memberIds,
+  addresses,
+  role,
+  geofences,
+  assignedGeofenceIdSet,
+  onClose,
+  onToggle,
+}: {
+  memberIds: string[]
+  addresses: AddressRow[]
+  role: string
+  geofences: GeofenceRow[]
+  assignedGeofenceIdSet: Set<string>
+  onClose: () => void
+  onToggle: (row: AddressRow) => void
+}) {
+  const rows = useMemo(
+    () =>
+      memberIds
+        .map((id) => addresses.find((a) => a.id === id))
+        .filter((a): a is AddressRow => a != null),
+    [memberIds, addresses],
+  )
+
+  return (
+    <div
+      className="nearby-sheet-backdrop"
+      role="presentation"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose()
+        }
+      }}
+    >
+      <div
+        className="nearby-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="nearby-sheet-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="nearby-sheet-header">
+          <h2 id="nearby-sheet-title">Addresses here</h2>
+          <button type="button" className="nearby-sheet-close" aria-label="Close list" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        <p className="nearby-sheet-subtitle">
+          {rows.length} at this spot — mark each unit as you go.
+        </p>
+        <ul className="nearby-sheet-list">
+          {rows.map((address) => {
+            const canToggle =
+              role === 'admin' ||
+              (role === 'canvasser' &&
+                addressInAssignedGeofences(address, geofences, assignedGeofenceIdSet))
+            return (
+              <li key={address.id} className="nearby-sheet-row">
+                <div className="nearby-sheet-row-text">
+                  <span className="nearby-sheet-address">{address.full_address}</span>
+                  <span className={`nearby-sheet-pill ${address.canvassed ? 'done' : 'todo'}`}>
+                    {address.canvassed ? 'Canvassed' : 'Not canvassed'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="nearby-sheet-action"
+                  disabled={!canToggle}
+                  onClick={() => void onToggle(address)}
+                >
+                  {role === 'admin'
+                    ? address.canvassed
+                      ? 'Mark uncanvassed'
+                      : 'Mark canvassed'
+                    : canToggle
+                      ? address.canvassed
+                        ? 'Mark uncanvassed'
+                        : 'Mark canvassed'
+                      : 'Outside your areas'}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      </div>
+    </div>
+  )
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [role, setRole] = useState<string>('')
@@ -289,9 +487,7 @@ function App() {
   const [isSendingLink, setIsSendingLink] = useState(false)
   const [isAuthLoading, setIsAuthLoading] = useState(true)
   const [addresses, setAddresses] = useState<AddressRow[]>([])
-  const [isMapLoading, setIsMapLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState('')
-  const [fetchedAddressCount, setFetchedAddressCount] = useState(0)
   const [viewport, setViewport] = useState<ViewportBounds | null>(null)
   const [hitViewportLimit, setHitViewportLimit] = useState(false)
   const [accessRows, setAccessRows] = useState<AccessRow[]>([])
@@ -312,6 +508,8 @@ function App() {
   const [geofenceDeleteConfirmId, setGeofenceDeleteConfirmId] = useState<string | null>(null)
   const [isGeofenceDeleting, setIsGeofenceDeleting] = useState(false)
   const [dotsEnabled, setDotsEnabled] = useState(true)
+  const [addressPopupOpenId, setAddressPopupOpenId] = useState<string | null>(null)
+  const [nearbyAddressSheet, setNearbyAddressSheet] = useState<{ memberIds: string[] } | null>(null)
   const selectedGeofence = useMemo(
     () => geofences.find((fence) => fence.id === selectedGeofenceId) ?? null,
     [geofences, selectedGeofenceId],
@@ -353,7 +551,13 @@ function App() {
       ),
     [addresses],
   )
-  const filteredOutCount = fetchedAddressCount - validAddresses.length
+  const addressClustersForMap = useMemo(() => {
+    const linked = clusterAddressesByProximity(validAddresses, ADDRESS_CLUSTER_MERGE_METERS)
+    const merged = mergeClustersByCrossGap(linked, ADDRESS_CLUSTER_CROSS_GAP_METERS)
+    const singles = merged.filter((c) => c.length === 1)
+    const multi = merged.filter((c) => c.length > 1)
+    return [...singles, ...multi]
+  }, [validAddresses])
   const adminCount = useMemo(
     () => accessRows.filter((entry) => entry.role === 'admin').length,
     [accessRows],
@@ -447,7 +651,6 @@ function App() {
       setSession(currentSession)
       setRole('')
       setAddresses([])
-      setIsMapLoading(true)
       setErrorMessage('')
     })
 
@@ -514,7 +717,6 @@ function App() {
         return
       }
 
-      setIsMapLoading(true)
       const { data, error, count } = await supabase
         .from('addresses')
         .select('id,full_address,lat,long,canvassed', { count: 'exact' })
@@ -527,17 +729,14 @@ function App() {
       if (error) {
         setErrorMessage(error.message)
         setAddresses([])
-        setFetchedAddressCount(0)
         setHitViewportLimit(false)
       } else {
         const rows = (data as AddressRow[]) ?? []
         const matchedCount = count ?? rows.length
-        setFetchedAddressCount(matchedCount)
         setHitViewportLimit(matchedCount > rows.length)
         setAddresses(rows)
       }
 
-      setIsMapLoading(false)
     }
 
     const timer = window.setTimeout(() => {
@@ -639,6 +838,18 @@ function App() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [showGeofenceDeleteDialog, isGeofenceDeleting])
+
+  useEffect(() => {
+    if (!nearbyAddressSheet) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setNearbyAddressSheet(null)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [nearbyAddressSheet])
 
   const centerPoint = useMemo<[number, number]>(() => RURAL_HALL_CENTER, [])
   const isCloseZoom = (viewport?.zoom ?? 13) >= 17
@@ -1030,10 +1241,8 @@ function App() {
     <main className="app-shell">
       <header className="top-bar">
         <h1>Canvass</h1>
-        <p>
-          {isMapLoading
-            ? 'Loading addresses...'
-            : `${validAddresses.length} rendered in view (${fetchedAddressCount} matched, ${filteredOutCount} filtered) · ${role || 'unknown role'}`}
+        <p className="top-bar-subtitle">
+          Map{role ? ` · ${role}` : ''}
         </p>
         <button type="button" className="signout-button" onClick={() => void signOut()}>
           Sign out
@@ -1091,7 +1300,7 @@ function App() {
               {role === 'canvasser' && (
                 <div className="canvasser-map-hint">
                   {assignedGeofenceIdList.length > 0
-                    ? 'Green areas are assigned to you. Open a dot inside them to mark canvassed.'
+                    ? 'Green areas are yours. A numbered red badge means several addresses in one spot — tap it for a sliding list. Single dots: tap near the pin (large touch target) to open the card.'
                     : 'No geofences are assigned to your email yet. Ask an admin to assign an area.'}
                 </div>
               )}
@@ -1121,64 +1330,168 @@ function App() {
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
               {showAddressDots &&
-                validAddresses.map((address) => {
-                  const canToggleThisAddress =
-                    role === 'admin' ||
-                    (role === 'canvasser' &&
-                      addressInAssignedGeofences(address, geofences, assignedGeofenceIdSet))
+                addressClustersForMap.map((members) => {
+                  const clusterKey = members
+                    .map((m) => m.id)
+                    .sort()
+                    .join('|')
+                  if (members.length === 1) {
+                    const address = members[0]
+                    const canToggleThisAddress =
+                      role === 'admin' ||
+                      (role === 'canvasser' &&
+                        addressInAssignedGeofences(address, geofences, assignedGeofenceIdSet))
+                    const isPopupOpen = addressPopupOpenId === address.id
+                    const baseRadius = address.canvassed ? 8 : 7
+                    const visualRadius = baseRadius + (isPopupOpen ? 4 : 0)
+                    const visualWeight = (address.canvassed ? 3 : 2) + (isPopupOpen ? 1 : 0)
+                    const popupOpenHandlers = {
+                      popupopen: () => setAddressPopupOpenId(address.id),
+                      popupclose: () =>
+                        setAddressPopupOpenId((prev) => (prev === address.id ? null : prev)),
+                    }
+                    const popupContent = (
+                      <>
+                        <p className="popup-address">{address.full_address}</p>
+                        <button
+                          type="button"
+                          className="status-button"
+                          disabled={!canToggleThisAddress}
+                          onClick={() => void toggleCanvassed(address)}
+                        >
+                          {role === 'admin'
+                            ? address.canvassed
+                              ? 'Mark uncanvassed'
+                              : 'Mark canvassed'
+                            : canToggleThisAddress
+                              ? address.canvassed
+                                ? 'Mark uncanvassed'
+                                : 'Mark canvassed'
+                              : 'Outside your assigned areas'}
+                        </button>
+                      </>
+                    )
+                    const visualPathOptions = {
+                      color: address.canvassed ? '#ffffff' : '#7f1d1d',
+                      fillColor: address.canvassed ? '#2563eb' : '#dc2626',
+                      fillOpacity: 1,
+                      weight: visualWeight,
+                      className: isPopupOpen
+                        ? 'address-dot-visual address-dot-visual--open'
+                        : 'address-dot-visual',
+                    }
+                    return (
+                      <Fragment key={address.id}>
+                        {address.canvassed && (
+                          <CircleMarker
+                            key={`${address.id}-halo`}
+                            center={[address.lat, address.long]}
+                            pane="addressPane"
+                            radius={isCloseZoom ? 20 : 13}
+                            interactive={false}
+                            pathOptions={{
+                              color: '#1d4ed8',
+                              fillColor: '#60a5fa',
+                              fillOpacity: 0.2,
+                              weight: 2,
+                            }}
+                          />
+                        )}
+                        {role === 'canvasser' ? (
+                          <>
+                            <CircleMarker
+                              key={`${address.id}-visual`}
+                              center={[address.lat, address.long]}
+                              pane="addressPane"
+                              radius={visualRadius}
+                              interactive={false}
+                              pathOptions={visualPathOptions}
+                            />
+                            <CircleMarker
+                              key={`${address.id}-hit`}
+                              center={[address.lat, address.long]}
+                              pane="addressPane"
+                              radius={CANVASSER_ADDRESS_HIT_RADIUS_PX}
+                              pathOptions={{
+                                className: 'address-marker-hit',
+                                color: '#000000',
+                                opacity: 0,
+                                fillColor: '#000000',
+                                fillOpacity: 0.001,
+                                weight: 0,
+                              }}
+                              eventHandlers={popupOpenHandlers}
+                            >
+                              <Popup>{popupContent}</Popup>
+                            </CircleMarker>
+                          </>
+                        ) : (
+                          <CircleMarker
+                            key={`${address.id}-marker`}
+                            center={[address.lat, address.long]}
+                            pane="addressPane"
+                            radius={visualRadius}
+                            pathOptions={visualPathOptions}
+                            eventHandlers={popupOpenHandlers}
+                          >
+                            <Popup>{popupContent}</Popup>
+                          </CircleMarker>
+                        )}
+                      </Fragment>
+                    )
+                  }
+                  const centroidLat =
+                    members.reduce((sum, m) => sum + m.lat, 0) / members.length
+                  const centroidLng =
+                    members.reduce((sum, m) => sum + m.long, 0) / members.length
+                  const anyCanvassed = members.some((m) => m.canvassed)
+                  const sortedMembers = [...members].sort((a, b) =>
+                    a.full_address.localeCompare(b.full_address),
+                  )
                   return (
-                    <Fragment key={`${address.id}-group`}>
-                      {address.canvassed && (
+                    <Fragment key={clusterKey}>
+                      {anyCanvassed && (
                         <CircleMarker
-                          key={`${address.id}-halo`}
-                          center={[address.lat, address.long]}
+                          key={`${clusterKey}-halo`}
+                          center={[centroidLat, centroidLng]}
                           pane="addressPane"
-                          radius={isCloseZoom ? 20 : 13}
+                          radius={isCloseZoom ? 22 : 15}
                           interactive={false}
                           pathOptions={{
                             color: '#1d4ed8',
                             fillColor: '#60a5fa',
-                            fillOpacity: 0.2,
+                            fillOpacity: 0.22,
                             weight: 2,
                           }}
                         />
                       )}
-                      <CircleMarker
-                        key={address.id}
-                        center={[address.lat, address.long]}
+                      <Marker
+                        position={[centroidLat, centroidLng]}
                         pane="addressPane"
-                        radius={address.canvassed ? 8 : 7}
-                        pathOptions={{
-                          color: address.canvassed ? '#ffffff' : '#7f1d1d',
-                          fillColor: address.canvassed ? '#2563eb' : '#dc2626',
-                          fillOpacity: 1,
-                          weight: address.canvassed ? 3 : 2,
+                        icon={createClusterCountIcon(members.length)}
+                        eventHandlers={{
+                          click: () => {
+                            setNearbyAddressSheet({
+                              memberIds: sortedMembers.map((m) => m.id),
+                            })
+                          },
                         }}
-                      >
-                        <Popup>
-                          <p className="popup-address">{address.full_address}</p>
-                          <button
-                            type="button"
-                            className="status-button"
-                            disabled={!canToggleThisAddress}
-                            onClick={() => void toggleCanvassed(address)}
-                          >
-                            {role === 'admin'
-                              ? address.canvassed
-                                ? 'Mark uncanvassed'
-                                : 'Mark canvassed'
-                              : canToggleThisAddress
-                                ? address.canvassed
-                                  ? 'Mark uncanvassed'
-                                  : 'Mark canvassed'
-                                : 'Outside your assigned areas'}
-                          </button>
-                        </Popup>
-                      </CircleMarker>
+                      />
                     </Fragment>
                   )
                 })}
             </MapContainer>
+            {nearbyAddressSheet && (
+              <NearbyAddressSheet
+                memberIds={nearbyAddressSheet.memberIds}
+                addresses={addresses}
+                role={role}
+                geofences={geofences}
+                assignedGeofenceIdSet={assignedGeofenceIdSet}
+                onClose={() => setNearbyAddressSheet(null)}
+                onToggle={toggleCanvassed}
+              />
+            )}
           </section>
           {role === 'admin' && (
             <aside className="geofence-panel">
