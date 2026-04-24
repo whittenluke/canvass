@@ -1,7 +1,11 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import { CircleMarker, MapContainer, Popup, TileLayer, useMapEvents } from 'react-leaflet'
+import { CircleMarker, MapContainer, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet'
+import L from 'leaflet'
+import 'leaflet-draw'
+import booleanPointInPolygon from '@turf/boolean-point-in-polygon'
+import { point } from '@turf/helpers'
 import { missingSupabaseConfig, supabase } from './lib/supabase'
 import './App.css'
 
@@ -27,9 +31,23 @@ type ViewportBounds = {
   zoom: number
 }
 
+type GeofenceRow = {
+  id: string
+  name: string
+  geometry: GeoJSON.Polygon
+  assigned_email: string | null
+}
+
+type GeofenceProgress = {
+  total: number
+  canvassed: number
+  remaining: number
+}
+
 const RURAL_HALL_CENTER: [number, number] = [36.2413, -80.2937]
 const APP_ROLES = new Set(['admin', 'canvasser'])
 const VIEWPORT_LIMIT = 4000
+const DOTS_VISIBLE_MIN_ZOOM = 15
 const APPROVED_LOGIN_EMAILS = (import.meta.env.VITE_ALLOWED_LOGIN_EMAILS ?? '')
   .split(',')
   .map((email) => email.trim().toLowerCase())
@@ -78,6 +96,150 @@ function MapViewportWatcher({
   return null
 }
 
+function MapPaneSetup() {
+  const map = useMap()
+
+  useEffect(() => {
+    const geofencePane = map.getPane('geofencePane') ?? map.createPane('geofencePane')
+    geofencePane.style.zIndex = '350'
+
+    const addressPane = map.getPane('addressPane') ?? map.createPane('addressPane')
+    addressPane.style.zIndex = '450'
+  }, [map])
+
+  return null
+}
+
+function GeofenceDrawManager({
+  geofences,
+  enabled,
+  selectedGeofenceId,
+  onCreated,
+  onEdited,
+  onDeleted,
+  onSelect,
+}: {
+  geofences: GeofenceRow[]
+  enabled: boolean
+  selectedGeofenceId: string
+  onCreated: (geometry: GeoJSON.Polygon) => void
+  onEdited: (updates: Array<{ id: string; geometry: GeoJSON.Polygon }>) => void
+  onDeleted: (ids: string[]) => void | Promise<boolean>
+  onSelect: (id: string) => void
+}) {
+  const map = useMap()
+  const featureGroupRef = useRef<L.FeatureGroup | null>(null)
+  const drawControlRef = useRef<L.Control.Draw | null>(null)
+
+  useEffect(() => {
+    if (!featureGroupRef.current) {
+      featureGroupRef.current = new L.FeatureGroup()
+      map.addLayer(featureGroupRef.current)
+    }
+
+    const group = featureGroupRef.current
+    group.clearLayers()
+    geofences.forEach((fence) => {
+      const layer = L.polygon(
+        fence.geometry.coordinates[0].map(([lng, lat]) => [lat, lng] as [number, number]),
+        {
+          pane: 'geofencePane',
+          color: fence.id === selectedGeofenceId ? '#2563eb' : '#334155',
+          weight: fence.id === selectedGeofenceId ? 3 : 2,
+          fillColor: fence.id === selectedGeofenceId ? '#93c5fd' : '#94a3b8',
+          fillOpacity: fence.id === selectedGeofenceId ? 0.2 : 0.1,
+        },
+      ) as L.Polygon & { geofenceId?: string }
+      layer.geofenceId = fence.id
+      layer.on('click', () => onSelect(fence.id))
+      group.addLayer(layer)
+    })
+  }, [map, geofences, selectedGeofenceId, onSelect])
+
+  useEffect(() => {
+    if (!featureGroupRef.current) return
+    if (enabled && !drawControlRef.current) {
+      drawControlRef.current = new L.Control.Draw({
+        draw: {
+          polygon: {},
+          rectangle: false,
+          polyline: false,
+          marker: false,
+          circle: false,
+          circlemarker: false,
+        },
+        edit: {
+          featureGroup: featureGroupRef.current,
+        },
+      })
+      map.addControl(drawControlRef.current)
+    }
+    if (!enabled && drawControlRef.current) {
+      map.removeControl(drawControlRef.current)
+      drawControlRef.current = null
+    }
+  }, [map, enabled])
+
+  useEffect(() => {
+    const handleCreated = (event: L.DrawEvents.Created) => {
+      const layer = event.layer as L.Polygon
+      const geometry = (layer.toGeoJSON() as GeoJSON.Feature<GeoJSON.Polygon>).geometry
+      onCreated(geometry)
+    }
+    const handleEdited = (event: L.DrawEvents.Edited) => {
+      const updates: Array<{ id: string; geometry: GeoJSON.Polygon }> = []
+      event.layers.eachLayer((layer) => {
+        const polygon = layer as L.Polygon & { geofenceId?: string }
+        if (!polygon.geofenceId) return
+        const geometry = (polygon.toGeoJSON() as GeoJSON.Feature<GeoJSON.Polygon>).geometry
+        updates.push({ id: polygon.geofenceId, geometry })
+      })
+      if (updates.length > 0) onEdited(updates)
+    }
+    const handleDeleted = (event: L.DrawEvents.Deleted) => {
+      const ids: string[] = []
+      event.layers.eachLayer((layer) => {
+        const polygon = layer as L.Polygon & { geofenceId?: string }
+        if (polygon.geofenceId) ids.push(polygon.geofenceId)
+      })
+      if (ids.length > 0) onDeleted(ids)
+    }
+
+    map.on(L.Draw.Event.CREATED, handleCreated)
+    map.on(L.Draw.Event.EDITED, handleEdited)
+    map.on(L.Draw.Event.DELETED, handleDeleted)
+    return () => {
+      map.off(L.Draw.Event.CREATED, handleCreated)
+      map.off(L.Draw.Event.EDITED, handleEdited)
+      map.off(L.Draw.Event.DELETED, handleDeleted)
+    }
+  }, [map, onCreated, onEdited, onDeleted])
+
+  return null
+}
+
+function GeofenceTrashIcon() {
+  return (
+    <svg
+      className="geofence-trash-svg"
+      viewBox="0 0 24 24"
+      width="20"
+      height="20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 6h18" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  )
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [role, setRole] = useState<string>('')
@@ -99,6 +261,34 @@ function App() {
   const [editingEmail, setEditingEmail] = useState('')
   const [editingEmailDraft, setEditingEmailDraft] = useState('')
   const [activeAdminView, setActiveAdminView] = useState<'map' | 'access'>('map')
+  const [geofences, setGeofences] = useState<GeofenceRow[]>([])
+  const [selectedGeofenceId, setSelectedGeofenceId] = useState('')
+  const [geofenceNameDraft, setGeofenceNameDraft] = useState('')
+  const [geofenceEmailDraft, setGeofenceEmailDraft] = useState('')
+  const [geofenceProgress, setGeofenceProgress] = useState<GeofenceProgress | null>(null)
+  const [isGeofenceProgressLoading, setIsGeofenceProgressLoading] = useState(false)
+  const [geofenceMessage, setGeofenceMessage] = useState('')
+  const [geofenceDeleteConfirmId, setGeofenceDeleteConfirmId] = useState<string | null>(null)
+  const [isGeofenceDeleting, setIsGeofenceDeleting] = useState(false)
+  const [dotsEnabled, setDotsEnabled] = useState(true)
+  const selectedGeofence = useMemo(
+    () => geofences.find((fence) => fence.id === selectedGeofenceId) ?? null,
+    [geofences, selectedGeofenceId],
+  )
+  const geofenceCompletionPercent = useMemo(() => {
+    if (!geofenceProgress || geofenceProgress.total === 0) return 0
+    return Math.round((geofenceProgress.canvassed / geofenceProgress.total) * 100)
+  }, [geofenceProgress])
+  const geofenceDisplayNameForDelete = useMemo(() => {
+    if (!selectedGeofence) return ''
+    const trimmed = geofenceNameDraft.trim()
+    return trimmed || selectedGeofence.name || 'Unnamed geofence'
+  }, [geofenceNameDraft, selectedGeofence])
+  const showGeofenceDeleteDialog = Boolean(
+    geofenceDeleteConfirmId &&
+      geofenceDeleteConfirmId === selectedGeofenceId &&
+      selectedGeofence,
+  )
   const validAddresses = useMemo(
     () =>
       addresses.filter(
@@ -307,8 +497,99 @@ function App() {
     void refreshAccessList()
   }, [role, session])
 
+  useEffect(() => {
+    const fetchGeofences = async () => {
+      if (!supabase || !session?.user || !APP_ROLES.has(role)) return
+      const { data, error } = await supabase
+        .from('geofences')
+        .select('id,name,geometry,assigned_email')
+        .order('created_at', { ascending: true })
+      if (error) {
+        setGeofenceMessage(error.message)
+        return
+      }
+      setGeofences((data as GeofenceRow[]) ?? [])
+    }
+    void fetchGeofences()
+  }, [session, role])
+
+  useEffect(() => {
+    if (!selectedGeofence) {
+      setGeofenceProgress(null)
+      return
+    }
+    setGeofenceNameDraft(selectedGeofence.name)
+    setGeofenceEmailDraft(selectedGeofence.assigned_email ?? '')
+  }, [selectedGeofenceId, selectedGeofence?.name, selectedGeofence?.assigned_email])
+
+  useEffect(() => {
+    const computeProgress = async () => {
+      if (!supabase || !selectedGeofence) {
+        setGeofenceProgress(null)
+        return
+      }
+      const coords = selectedGeofence.geometry.coordinates[0] ?? []
+      if (coords.length === 0) {
+        setGeofenceProgress({ total: 0, canvassed: 0, remaining: 0 })
+        return
+      }
+      setIsGeofenceProgressLoading(true)
+      const lngs = coords.map(([lng]) => lng)
+      const lats = coords.map(([, lat]) => lat)
+      const minLng = Math.min(...lngs)
+      const maxLng = Math.max(...lngs)
+      const minLat = Math.min(...lats)
+      const maxLat = Math.max(...lats)
+
+      let from = 0
+      const pageSize = 1000
+      let total = 0
+      let canvassed = 0
+      let done = false
+      while (!done) {
+        const { data, error } = await supabase
+          .from('addresses')
+          .select('lat,long,canvassed')
+          .gte('lat', minLat)
+          .lte('lat', maxLat)
+          .gte('long', minLng)
+          .lte('long', maxLng)
+          .range(from, from + pageSize - 1)
+        if (error) {
+          setGeofenceMessage(error.message)
+          break
+        }
+        const rows = (data as Array<{ lat: number; long: number; canvassed: boolean }>) ?? []
+        rows.forEach((row) => {
+          if (booleanPointInPolygon(point([row.long, row.lat]), selectedGeofence.geometry)) {
+            total += 1
+            if (row.canvassed) canvassed += 1
+          }
+        })
+        if (rows.length < pageSize) done = true
+        else from += pageSize
+      }
+      setGeofenceProgress({ total, canvassed, remaining: Math.max(total - canvassed, 0) })
+      setIsGeofenceProgressLoading(false)
+    }
+    void computeProgress()
+  }, [selectedGeofenceId])
+
+  useEffect(() => {
+    if (!showGeofenceDeleteDialog) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !isGeofenceDeleting) {
+        event.preventDefault()
+        setGeofenceDeleteConfirmId(null)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [showGeofenceDeleteDialog, isGeofenceDeleting])
+
   const centerPoint = useMemo<[number, number]>(() => RURAL_HALL_CENTER, [])
   const isCloseZoom = (viewport?.zoom ?? 13) >= 17
+  const showAddressDots = dotsEnabled && (viewport?.zoom ?? 13) >= DOTS_VISIBLE_MIN_ZOOM
 
   const toggleCanvassed = async (address: AddressRow) => {
     if (!supabase) {
@@ -322,6 +603,22 @@ function App() {
     }
 
     const nextState = !address.canvassed
+    const addressIsInsideSelectedGeofence =
+      !!selectedGeofence &&
+      booleanPointInPolygon(point([address.long, address.lat]), selectedGeofence.geometry)
+
+    if (addressIsInsideSelectedGeofence) {
+      setGeofenceProgress((current) => {
+        if (!current) return current
+        const nextCanvassed = current.canvassed + (nextState ? 1 : -1)
+        return {
+          ...current,
+          canvassed: Math.max(0, nextCanvassed),
+          remaining: Math.max(current.total - Math.max(0, nextCanvassed), 0),
+        }
+      })
+    }
+
     setAddresses((current) =>
       current.map((item) =>
         item.id === address.id ? { ...item, canvassed: nextState } : item,
@@ -334,6 +631,17 @@ function App() {
       .eq('id', address.id)
 
     if (error) {
+      if (addressIsInsideSelectedGeofence) {
+        setGeofenceProgress((current) => {
+          if (!current) return current
+          const revertedCanvassed = current.canvassed + (address.canvassed ? 1 : -1)
+          return {
+            ...current,
+            canvassed: Math.max(0, revertedCanvassed),
+            remaining: Math.max(current.total - Math.max(0, revertedCanvassed), 0),
+          }
+        })
+      }
       setAddresses((current) =>
         current.map((item) =>
           item.id === address.id ? { ...item, canvassed: address.canvassed } : item,
@@ -513,6 +821,103 @@ function App() {
     await refreshAccessList()
   }
 
+  const handleGeofenceCreated = async (geometry: GeoJSON.Polygon) => {
+    if (!supabase || role !== 'admin') return
+    const { data, error } = await supabase
+      .from('geofences')
+      .insert({
+        name: 'New geofence',
+        geometry,
+        assigned_email: null,
+      })
+      .select('id,name,geometry,assigned_email')
+      .single()
+    if (error) {
+      setGeofenceMessage(error.message)
+      return
+    }
+    const next = data as GeofenceRow
+    setGeofences((current) => [...current, next])
+    setGeofenceDeleteConfirmId(null)
+    setSelectedGeofenceId(next.id)
+  }
+
+  const handleGeofenceEdited = async (
+    updates: Array<{ id: string; geometry: GeoJSON.Polygon }>,
+  ) => {
+    if (!supabase || role !== 'admin') return
+    for (const update of updates) {
+      const { error } = await supabase
+        .from('geofences')
+        .update({ geometry: update.geometry })
+        .eq('id', update.id)
+      if (error) {
+        setGeofenceMessage(error.message)
+        return
+      }
+    }
+    setGeofences((current) =>
+      current.map((fence) => {
+        const changed = updates.find((item) => item.id === fence.id)
+        return changed ? { ...fence, geometry: changed.geometry } : fence
+      }),
+    )
+  }
+
+  const handleGeofenceDeleted = async (ids: string[]): Promise<boolean> => {
+    if (!supabase || role !== 'admin') return false
+    const { error } = await supabase.from('geofences').delete().in('id', ids)
+    if (error) {
+      setGeofenceMessage(error.message)
+      return false
+    }
+    setGeofenceDeleteConfirmId((current) => (current && ids.includes(current) ? null : current))
+    setGeofences((current) => current.filter((fence) => !ids.includes(fence.id)))
+    if (ids.includes(selectedGeofenceId)) {
+      setSelectedGeofenceId('')
+      setGeofenceProgress(null)
+    }
+    return true
+  }
+
+  const saveSelectedGeofence = async () => {
+    if (!supabase || !selectedGeofenceId || role !== 'admin') return
+    const name = geofenceNameDraft.trim() || 'Unnamed geofence'
+    const assignedEmail = geofenceEmailDraft.trim().toLowerCase() || null
+    const { error } = await supabase
+      .from('geofences')
+      .update({ name, assigned_email: assignedEmail })
+      .eq('id', selectedGeofenceId)
+    if (error) {
+      setGeofenceMessage(error.message)
+      return
+    }
+    setGeofences((current) =>
+      current.map((fence) =>
+        fence.id === selectedGeofenceId ? { ...fence, name, assigned_email: assignedEmail } : fence,
+      ),
+    )
+    setGeofenceMessage('Geofence details saved.')
+  }
+
+  const confirmGeofenceDelete = async () => {
+    if (!selectedGeofenceId || role !== 'admin') return
+    setIsGeofenceDeleting(true)
+    const id = selectedGeofenceId
+    const ok = await handleGeofenceDeleted([id])
+    setIsGeofenceDeleting(false)
+    if (ok) {
+      setGeofenceNameDraft('')
+      setGeofenceEmailDraft('')
+      setGeofenceMessage('Geofence deleted.')
+    }
+  }
+
+  const selectGeofenceId = (id: string) => {
+    setGeofenceDeleteConfirmId(null)
+    setSelectedGeofenceId(id)
+  }
+
   if (isAuthLoading) {
     return (
       <main className="auth-shell">
@@ -577,7 +982,10 @@ function App() {
           <button
             type="button"
             className={activeAdminView === 'access' ? 'view-tab active' : 'view-tab'}
-            onClick={() => setActiveAdminView('access')}
+            onClick={() => {
+              setGeofenceDeleteConfirmId(null)
+              setActiveAdminView('access')
+            }}
           >
             Admin Access
           </button>
@@ -585,27 +993,62 @@ function App() {
       )}
 
       {errorMessage && <p className="error-banner">{errorMessage}</p>}
-      {hitViewportLimit && (
-        <p className="error-banner">
-          Too many points in this view; showing first {VIEWPORT_LIMIT}. Zoom in for full detail.
-        </p>
-      )}
 
       {(role !== 'admin' || activeAdminView === 'map') && (
         <section className="map-page">
+          <div className="map-status-line">
+            {!dotsEnabled ? (
+              <p className="map-status-text">Address dots are hidden. Use "Show dots" to re-enable.</p>
+            ) : !showAddressDots ? (
+              <p className="map-status-text">Zoom to see address dots.</p>
+            ) : hitViewportLimit ? (
+              <p className="map-status-text">
+                Too many points in this view; showing first {VIEWPORT_LIMIT}. Zoom in for full detail.
+              </p>
+            ) : (
+              <p className="map-status-text muted">Map ready.</p>
+            )}
+          </div>
           <section className="map-panel">
             <MapContainer center={centerPoint} zoom={13} scrollWheelZoom className="map-view">
+              <MapPaneSetup />
+              {selectedGeofence && (
+                <div className="selected-geofence-chip">
+                  Selected: {selectedGeofence.name}
+                  {selectedGeofence.assigned_email ? ` (${selectedGeofence.assigned_email})` : ''}
+                </div>
+              )}
+              <button
+                type="button"
+                className="map-icon-control"
+                title={dotsEnabled ? 'Hide address dots' : 'Show address dots'}
+                aria-label={dotsEnabled ? 'Hide address dots' : 'Show address dots'}
+                onClick={() => setDotsEnabled((current) => !current)}
+              >
+                {dotsEnabled ? '◉' : '○'}
+              </button>
               <MapViewportWatcher onViewportChange={setViewport} />
+              <GeofenceDrawManager
+                geofences={geofences}
+                enabled={role === 'admin'}
+                selectedGeofenceId={selectedGeofenceId}
+                onCreated={handleGeofenceCreated}
+                onEdited={handleGeofenceEdited}
+                onDeleted={handleGeofenceDeleted}
+                onSelect={selectGeofenceId}
+              />
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
-              {validAddresses.map((address) => (
+              {showAddressDots &&
+                validAddresses.map((address) => (
                 <Fragment key={`${address.id}-group`}>
                   {address.canvassed && (
                     <CircleMarker
                       key={`${address.id}-halo`}
                       center={[address.lat, address.long]}
+                      pane="addressPane"
                       radius={isCloseZoom ? 20 : 13}
                       interactive={false}
                       pathOptions={{
@@ -619,6 +1062,7 @@ function App() {
                   <CircleMarker
                     key={address.id}
                     center={[address.lat, address.long]}
+                    pane="addressPane"
                     radius={address.canvassed ? 8 : 7}
                     pathOptions={{
                       color: address.canvassed ? '#ffffff' : '#7f1d1d',
@@ -647,6 +1091,130 @@ function App() {
               ))}
             </MapContainer>
           </section>
+          {role === 'admin' && (
+            <aside className="geofence-panel">
+              <div className="geofence-panel-header">
+                <h3>Geofence Details</h3>
+                {selectedGeofence ? (
+                  <button
+                    type="button"
+                    className="geofence-delete-icon"
+                    aria-label={`Delete geofence ${geofenceDisplayNameForDelete}`}
+                    onClick={() => setGeofenceDeleteConfirmId(selectedGeofenceId)}
+                  >
+                    <GeofenceTrashIcon />
+                  </button>
+                ) : null}
+              </div>
+              {selectedGeofence ? (
+                <>
+                  <label>
+                    Name
+                    <input
+                      type="text"
+                      value={geofenceNameDraft}
+                      onChange={(event) => setGeofenceNameDraft(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Assigned email
+                    <input
+                      type="email"
+                      value={geofenceEmailDraft}
+                      onChange={(event) => setGeofenceEmailDraft(event.target.value)}
+                      placeholder="canvasser@example.com"
+                    />
+                  </label>
+                  <div className="geofence-save-row">
+                    <button type="button" className="status-button" onClick={() => void saveSelectedGeofence()}>
+                      Save geofence
+                    </button>
+                  </div>
+                  <div className="geofence-progress">
+                    {isGeofenceProgressLoading ? (
+                      <p>Loading progress...</p>
+                    ) : geofenceProgress ? (
+                      <>
+                        <div className="progress-summary">
+                          <div className="progress-headline">
+                            <span>Complete</span>
+                            <strong>{geofenceCompletionPercent}%</strong>
+                          </div>
+                          <div className="progress-bar-track" aria-hidden="true">
+                            <div
+                              className="progress-bar-fill"
+                              style={{ width: `${geofenceCompletionPercent}%` }}
+                            />
+                          </div>
+                        </div>
+                        <div className="metric-grid compact">
+                          <div className="metric-card emphasis">
+                            <span>Remaining</span>
+                            <strong>{geofenceProgress.remaining}</strong>
+                          </div>
+                          <div className="metric-card">
+                            <span>Done</span>
+                            <strong>{geofenceProgress.canvassed}</strong>
+                          </div>
+                          <div className="metric-card">
+                            <span>Total</span>
+                            <strong>{geofenceProgress.total}</strong>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <p>Select a geofence to see progress.</p>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <p>Draw or click a geofence to edit assignment and view progress.</p>
+              )}
+              {geofenceMessage && <p className="access-message">{geofenceMessage}</p>}
+              {showGeofenceDeleteDialog && selectedGeofence && (
+                <div
+                  className="geofence-confirm-backdrop"
+                  role="presentation"
+                  onClick={(event) => {
+                    if (event.target === event.currentTarget && !isGeofenceDeleting) {
+                      setGeofenceDeleteConfirmId(null)
+                    }
+                  }}
+                >
+                  <div
+                    className="geofence-confirm-dialog"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="geofence-delete-dialog-title"
+                  >
+                    <h4 id="geofence-delete-dialog-title">Delete this geofence?</h4>
+                    <p>
+                      <span className="geofence-confirm-name">{geofenceDisplayNameForDelete}</span> will be removed.
+                      This cannot be undone.
+                    </p>
+                    <div className="geofence-confirm-actions">
+                      <button
+                        type="button"
+                        className="geofence-confirm-cancel"
+                        disabled={isGeofenceDeleting}
+                        onClick={() => setGeofenceDeleteConfirmId(null)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="geofence-confirm-delete"
+                        disabled={isGeofenceDeleting}
+                        onClick={() => void confirmGeofenceDelete()}
+                      >
+                        {isGeofenceDeleting ? 'Deleting…' : 'Delete'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </aside>
+          )}
         </section>
       )}
       {role === 'admin' && activeAdminView === 'access' && (

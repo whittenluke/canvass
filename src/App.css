@@ -135,16 +135,81 @@
 .map-page {
   flex: 1;
   min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-rows: 36px 1fr;
+  gap: 0.75rem;
+  padding: 0.75rem;
+}
+
+.map-status-line {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 0 0.6rem;
+  min-height: 36px;
+}
+
+.map-status-text {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #334155;
+}
+
+.map-status-text.muted {
+  color: #64748b;
 }
 
 .map-panel {
-  height: calc(100vh - 132px);
+  grid-column: 1;
+  grid-row: 2;
+  height: calc(100vh - 180px);
   min-height: 420px;
+  position: relative;
 }
 
 .map-view {
   width: 100%;
   height: 100%;
+}
+
+.map-icon-control {
+  position: absolute;
+  z-index: 1000;
+  top: 12px;
+  right: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid #bcccdc;
+  background: rgba(255, 255, 255, 0.95);
+  color: #102a43;
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.15);
+}
+
+.selected-geofence-chip {
+  position: absolute;
+  z-index: 1000;
+  top: 12px;
+  left: 12px;
+  border: 1px solid #bfdbfe;
+  background: rgba(239, 246, 255, 0.95);
+  color: #1e3a8a;
+  border-radius: 10px;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  max-width: 380px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .popup-address {
@@ -316,8 +381,261 @@
   color: #166534;
 }
 
+.geofence-panel {
+  grid-column: 2;
+  grid-row: 2;
+  background: #fff;
+  border: 1px solid #d9e2ec;
+  border-radius: 12px;
+  padding: 0.85rem;
+}
+
+.geofence-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.geofence-panel-header h3 {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  color: #102a43;
+  font-size: 1.05rem;
+}
+
+.geofence-delete-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #627d98;
+  cursor: pointer;
+}
+
+.geofence-delete-icon:hover {
+  background: #f0f4f8;
+  color: #486581;
+}
+
+.geofence-delete-icon:focus-visible {
+  outline: 2px solid #486581;
+  outline-offset: 2px;
+}
+
+.geofence-trash-svg {
+  display: block;
+}
+
+.geofence-panel label {
+  display: block;
+  margin-bottom: 0.55rem;
+  font-size: 0.88rem;
+  color: #334e68;
+}
+
+.geofence-panel input {
+  display: block;
+  width: 100%;
+  margin-top: 0.2rem;
+  border: 1px solid #bcccdc;
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+}
+
+.geofence-save-row {
+  margin: 0.5rem 0 0.65rem;
+}
+
+.geofence-save-row .status-button {
+  width: 100%;
+}
+
+.geofence-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 8000;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(16, 42, 67, 0.45);
+}
+
+.geofence-confirm-dialog {
+  width: min(360px, 100%);
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #d9e2ec;
+  box-shadow: 0 12px 40px rgba(16, 42, 67, 0.18);
+  padding: 1rem 1.1rem;
+}
+
+.geofence-confirm-dialog h4 {
+  margin: 0 0 0.45rem;
+  font-size: 1.05rem;
+  color: #102a43;
+}
+
+.geofence-confirm-dialog > p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: #486581;
+}
+
+.geofence-confirm-name {
+  font-weight: 600;
+  color: #243b53;
+}
+
+.geofence-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.geofence-confirm-cancel {
+  border: 1px solid #bcccdc;
+  border-radius: 8px;
+  background: #fff;
+  color: #334e68;
+  padding: 0.45rem 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.geofence-confirm-cancel:hover:not(:disabled) {
+  background: #f8fafc;
+}
+
+.geofence-confirm-delete {
+  border: 0;
+  border-radius: 8px;
+  background: #9b2c2c;
+  color: #fff;
+  padding: 0.45rem 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.geofence-confirm-delete:hover:not(:disabled) {
+  background: #822727;
+}
+
+.geofence-confirm-cancel:disabled,
+.geofence-confirm-delete:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.geofence-progress p {
+  margin: 0.2rem 0;
+}
+
+.metric-grid {
+  margin-top: 0.5rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.metric-grid.compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metric-card {
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 0.45rem 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.metric-card span {
+  font-size: 0.74rem;
+  color: #475569;
+}
+
+.metric-card strong {
+  font-size: 1rem;
+  color: #0f172a;
+}
+
+.metric-card.emphasis {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.progress-summary {
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #f8fbff;
+  padding: 0.55rem 0.65rem;
+}
+
+.progress-headline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+
+.progress-headline span {
+  font-size: 0.8rem;
+  color: #334155;
+}
+
+.progress-headline strong {
+  font-size: 1.1rem;
+  color: #0f172a;
+}
+
+.progress-bar-track {
+  height: 10px;
+  border-radius: 999px;
+  background: #dbeafe;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3b82f6, #2563eb);
+  transition: width 180ms ease;
+}
+
 @media (max-width: 900px) {
+  .map-page {
+    grid-template-columns: 1fr;
+    grid-template-rows: 36px 1fr auto;
+  }
+
+  .map-panel {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .geofence-panel {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
   .access-form {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-grid.compact {
     grid-template-columns: 1fr;
   }
 }
