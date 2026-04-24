@@ -44,6 +44,18 @@ type GeofenceProgress = {
   remaining: number
 }
 
+function addressInAssignedGeofences(
+  address: AddressRow,
+  geofences: GeofenceRow[],
+  assignedGeofenceIdSet: Set<string>,
+): boolean {
+  return geofences.some(
+    (g) =>
+      assignedGeofenceIdSet.has(g.id) &&
+      booleanPointInPolygon(point([address.long, address.lat]), g.geometry),
+  )
+}
+
 const RURAL_HALL_CENTER: [number, number] = [36.2413, -80.2937]
 const APP_ROLES = new Set(['admin', 'canvasser'])
 const VIEWPORT_LIMIT = 4000
@@ -113,6 +125,8 @@ function MapPaneSetup() {
 function GeofenceDrawManager({
   geofences,
   enabled,
+  allowGeofenceSelect,
+  assignedGeofenceIdList,
   selectedGeofenceId,
   onCreated,
   onEdited,
@@ -121,6 +135,8 @@ function GeofenceDrawManager({
 }: {
   geofences: GeofenceRow[]
   enabled: boolean
+  allowGeofenceSelect: boolean
+  assignedGeofenceIdList: string[]
   selectedGeofenceId: string
   onCreated: (geometry: GeoJSON.Polygon) => void
   onEdited: (updates: Array<{ id: string; geometry: GeoJSON.Polygon }>) => void
@@ -139,22 +155,47 @@ function GeofenceDrawManager({
 
     const group = featureGroupRef.current
     group.clearLayers()
+    const assignedSet = new Set(assignedGeofenceIdList)
     geofences.forEach((fence) => {
+      const isSelected = fence.id === selectedGeofenceId
+      const isMine = assignedSet.has(fence.id)
+      let color: string
+      let weight: number
+      let fillColor: string
+      let fillOpacity: number
+      if (allowGeofenceSelect) {
+        color = isSelected ? '#2563eb' : '#334155'
+        weight = isSelected ? 3 : 2
+        fillColor = isSelected ? '#93c5fd' : '#94a3b8'
+        fillOpacity = isSelected ? 0.2 : 0.1
+      } else if (assignedGeofenceIdList.length > 0) {
+        color = isMine ? '#047857' : '#94a3b8'
+        weight = isMine ? 3 : 1.5
+        fillColor = isMine ? '#6ee7b7' : '#cbd5e1'
+        fillOpacity = isMine ? 0.24 : 0.07
+      } else {
+        color = '#94a3b8'
+        weight = 1.5
+        fillColor = '#cbd5e1'
+        fillOpacity = 0.06
+      }
       const layer = L.polygon(
         fence.geometry.coordinates[0].map(([lng, lat]) => [lat, lng] as [number, number]),
         {
           pane: 'geofencePane',
-          color: fence.id === selectedGeofenceId ? '#2563eb' : '#334155',
-          weight: fence.id === selectedGeofenceId ? 3 : 2,
-          fillColor: fence.id === selectedGeofenceId ? '#93c5fd' : '#94a3b8',
-          fillOpacity: fence.id === selectedGeofenceId ? 0.2 : 0.1,
+          color,
+          weight,
+          fillColor,
+          fillOpacity,
         },
       ) as L.Polygon & { geofenceId?: string }
       layer.geofenceId = fence.id
-      layer.on('click', () => onSelect(fence.id))
+      if (allowGeofenceSelect) {
+        layer.on('click', () => onSelect(fence.id))
+      }
       group.addLayer(layer)
     })
-  }, [map, geofences, selectedGeofenceId, onSelect])
+  }, [map, geofences, selectedGeofenceId, onSelect, allowGeofenceSelect, assignedGeofenceIdList])
 
   useEffect(() => {
     if (!featureGroupRef.current) return
@@ -274,6 +315,18 @@ function App() {
   const selectedGeofence = useMemo(
     () => geofences.find((fence) => fence.id === selectedGeofenceId) ?? null,
     [geofences, selectedGeofenceId],
+  )
+  const sessionEmail = (session?.user?.email ?? '').trim().toLowerCase()
+  const assignedGeofenceIdList = useMemo(
+    () =>
+      geofences
+        .filter((g) => (g.assigned_email ?? '').trim().toLowerCase() === sessionEmail)
+        .map((g) => g.id),
+    [geofences, sessionEmail],
+  )
+  const assignedGeofenceIdSet = useMemo(
+    () => new Set(assignedGeofenceIdList),
+    [assignedGeofenceIdList],
   )
   const geofenceCompletionPercent = useMemo(() => {
     if (!geofenceProgress || geofenceProgress.total === 0) return 0
@@ -597,13 +650,23 @@ function App() {
       return
     }
 
-    if (role !== 'admin') {
-      setErrorMessage('Address status edits are admin-only until canvasser geofence logic is added.')
+    if (role !== 'admin' && role !== 'canvasser') {
+      setErrorMessage('You do not have permission to update addresses.')
       return
     }
 
     const nextState = !address.canvassed
+
+    if (role === 'canvasser') {
+      const inMine = addressInAssignedGeofences(address, geofences, assignedGeofenceIdSet)
+      if (!inMine) {
+        setErrorMessage('This address is outside your assigned areas.')
+        return
+      }
+    }
+
     const addressIsInsideSelectedGeofence =
+      role === 'admin' &&
       !!selectedGeofence &&
       booleanPointInPolygon(point([address.long, address.lat]), selectedGeofence.geometry)
 
@@ -625,10 +688,13 @@ function App() {
       ),
     )
 
-    const { error } = await supabase
-      .from('addresses')
-      .update({ canvassed: nextState })
-      .eq('id', address.id)
+    const { error } =
+      role === 'admin'
+        ? await supabase.from('addresses').update({ canvassed: nextState }).eq('id', address.id)
+        : await supabase.rpc('canvasser_set_address_canvassed', {
+            p_address_id: address.id,
+            p_canvassed: nextState,
+          })
 
     if (error) {
       if (addressIsInsideSelectedGeofence) {
@@ -1012,10 +1078,17 @@ function App() {
           <section className="map-panel">
             <MapContainer center={centerPoint} zoom={13} scrollWheelZoom className="map-view">
               <MapPaneSetup />
-              {selectedGeofence && (
+              {role === 'admin' && selectedGeofence && (
                 <div className="selected-geofence-chip">
                   Selected: {selectedGeofence.name}
                   {selectedGeofence.assigned_email ? ` (${selectedGeofence.assigned_email})` : ''}
+                </div>
+              )}
+              {role === 'canvasser' && (
+                <div className="canvasser-map-hint">
+                  {assignedGeofenceIdList.length > 0
+                    ? 'Green areas are assigned to you. Open a dot inside them to mark canvassed.'
+                    : 'No geofences are assigned to your email yet. Ask an admin to assign an area.'}
                 </div>
               )}
               <button
@@ -1031,6 +1104,8 @@ function App() {
               <GeofenceDrawManager
                 geofences={geofences}
                 enabled={role === 'admin'}
+                allowGeofenceSelect={role === 'admin'}
+                assignedGeofenceIdList={assignedGeofenceIdList}
                 selectedGeofenceId={selectedGeofenceId}
                 onCreated={handleGeofenceCreated}
                 onEdited={handleGeofenceEdited}
@@ -1042,53 +1117,63 @@ function App() {
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
               {showAddressDots &&
-                validAddresses.map((address) => (
-                <Fragment key={`${address.id}-group`}>
-                  {address.canvassed && (
-                    <CircleMarker
-                      key={`${address.id}-halo`}
-                      center={[address.lat, address.long]}
-                      pane="addressPane"
-                      radius={isCloseZoom ? 20 : 13}
-                      interactive={false}
-                      pathOptions={{
-                        color: '#1d4ed8',
-                        fillColor: '#60a5fa',
-                        fillOpacity: 0.2,
-                        weight: 2,
-                      }}
-                    />
-                  )}
-                  <CircleMarker
-                    key={address.id}
-                    center={[address.lat, address.long]}
-                    pane="addressPane"
-                    radius={address.canvassed ? 8 : 7}
-                    pathOptions={{
-                      color: address.canvassed ? '#ffffff' : '#7f1d1d',
-                      fillColor: address.canvassed ? '#2563eb' : '#dc2626',
-                      fillOpacity: 1,
-                      weight: address.canvassed ? 3 : 2,
-                    }}
-                  >
-                    <Popup>
-                      <p className="popup-address">{address.full_address}</p>
-                      <button
-                        type="button"
-                        className="status-button"
-                        disabled={role !== 'admin'}
-                        onClick={() => void toggleCanvassed(address)}
+                validAddresses.map((address) => {
+                  const canToggleThisAddress =
+                    role === 'admin' ||
+                    (role === 'canvasser' &&
+                      addressInAssignedGeofences(address, geofences, assignedGeofenceIdSet))
+                  return (
+                    <Fragment key={`${address.id}-group`}>
+                      {address.canvassed && (
+                        <CircleMarker
+                          key={`${address.id}-halo`}
+                          center={[address.lat, address.long]}
+                          pane="addressPane"
+                          radius={isCloseZoom ? 20 : 13}
+                          interactive={false}
+                          pathOptions={{
+                            color: '#1d4ed8',
+                            fillColor: '#60a5fa',
+                            fillOpacity: 0.2,
+                            weight: 2,
+                          }}
+                        />
+                      )}
+                      <CircleMarker
+                        key={address.id}
+                        center={[address.lat, address.long]}
+                        pane="addressPane"
+                        radius={address.canvassed ? 8 : 7}
+                        pathOptions={{
+                          color: address.canvassed ? '#ffffff' : '#7f1d1d',
+                          fillColor: address.canvassed ? '#2563eb' : '#dc2626',
+                          fillOpacity: 1,
+                          weight: address.canvassed ? 3 : 2,
+                        }}
                       >
-                        {role === 'admin'
-                          ? address.canvassed
-                            ? 'Mark uncanvassed'
-                            : 'Mark canvassed'
-                          : 'Read only (canvasser permissions next phase)'}
-                      </button>
-                    </Popup>
-                  </CircleMarker>
-                </Fragment>
-              ))}
+                        <Popup>
+                          <p className="popup-address">{address.full_address}</p>
+                          <button
+                            type="button"
+                            className="status-button"
+                            disabled={!canToggleThisAddress}
+                            onClick={() => void toggleCanvassed(address)}
+                          >
+                            {role === 'admin'
+                              ? address.canvassed
+                                ? 'Mark uncanvassed'
+                                : 'Mark canvassed'
+                              : canToggleThisAddress
+                                ? address.canvassed
+                                  ? 'Mark uncanvassed'
+                                  : 'Mark canvassed'
+                                : 'Outside your assigned areas'}
+                          </button>
+                        </Popup>
+                      </CircleMarker>
+                    </Fragment>
+                  )
+                })}
             </MapContainer>
           </section>
           {role === 'admin' && (
