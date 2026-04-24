@@ -1,0 +1,17 @@
+{
+  "name": "Canvass",
+  "short_name": "Canvass",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f0f4f8",
+  "theme_color": "#102a43",
+  "description": "Neighborhood canvassing map for admins and canvassers.",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
