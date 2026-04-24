@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import { CircleMarker, MapContainer, Popup, TileLayer } from 'react-leaflet'
+import { CircleMarker, MapContainer, Popup, TileLayer, useMapEvents } from 'react-leaflet'
 import { missingSupabaseConfig, supabase } from './lib/supabase'
 import './App.css'
 
@@ -19,13 +19,64 @@ type AccessRow = {
   status: 'pending' | 'active'
 }
 
+type ViewportBounds = {
+  south: number
+  west: number
+  north: number
+  east: number
+  zoom: number
+}
+
 const RURAL_HALL_CENTER: [number, number] = [36.2413, -80.2937]
 const APP_ROLES = new Set(['admin', 'canvasser'])
+const VIEWPORT_LIMIT = 4000
 const APPROVED_LOGIN_EMAILS = (import.meta.env.VITE_ALLOWED_LOGIN_EMAILS ?? '')
   .split(',')
   .map((email) => email.trim().toLowerCase())
   .filter(Boolean)
 const AUTH_REDIRECT_OVERRIDE = import.meta.env.VITE_AUTH_REDIRECT_URL?.trim()
+
+function MapViewportWatcher({
+  onViewportChange,
+}: {
+  onViewportChange: (nextViewport: ViewportBounds) => void
+}) {
+  const map = useMapEvents({
+    moveend: () => {
+      const bounds = map.getBounds()
+      onViewportChange({
+        south: bounds.getSouth(),
+        west: bounds.getWest(),
+        north: bounds.getNorth(),
+        east: bounds.getEast(),
+        zoom: map.getZoom(),
+      })
+    },
+    zoomend: () => {
+      const bounds = map.getBounds()
+      onViewportChange({
+        south: bounds.getSouth(),
+        west: bounds.getWest(),
+        north: bounds.getNorth(),
+        east: bounds.getEast(),
+        zoom: map.getZoom(),
+      })
+    },
+  })
+
+  useEffect(() => {
+    const bounds = map.getBounds()
+    onViewportChange({
+      south: bounds.getSouth(),
+      west: bounds.getWest(),
+      north: bounds.getNorth(),
+      east: bounds.getEast(),
+      zoom: map.getZoom(),
+    })
+  }, [map, onViewportChange])
+
+  return null
+}
 
 function App() {
   const [session, setSession] = useState<Session | null>(null)
@@ -37,6 +88,9 @@ function App() {
   const [addresses, setAddresses] = useState<AddressRow[]>([])
   const [isMapLoading, setIsMapLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState('')
+  const [fetchedAddressCount, setFetchedAddressCount] = useState(0)
+  const [viewport, setViewport] = useState<ViewportBounds | null>(null)
+  const [hitViewportLimit, setHitViewportLimit] = useState(false)
   const [accessRows, setAccessRows] = useState<AccessRow[]>([])
   const [isProfilesLoading, setIsProfilesLoading] = useState(false)
   const [accessMessage, setAccessMessage] = useState('')
@@ -56,6 +110,7 @@ function App() {
       ),
     [addresses],
   )
+  const filteredOutCount = fetchedAddressCount - validAddresses.length
   const adminCount = useMemo(
     () => accessRows.filter((entry) => entry.role === 'admin').length,
     [accessRows],
@@ -212,33 +267,48 @@ function App() {
 
   useEffect(() => {
     const fetchAddresses = async () => {
-      if (!supabase || !session?.user || !APP_ROLES.has(role)) {
+      if (!supabase || !session?.user || !APP_ROLES.has(role) || !viewport) {
         return
       }
 
-      const { data, error } = await supabase
+      setIsMapLoading(true)
+      const { data, error, count } = await supabase
         .from('addresses')
-        .select('id,full_address,lat,long,canvassed')
-        .order('full_address', { ascending: true })
-        .limit(5000)
+        .select('id,full_address,lat,long,canvassed', { count: 'exact' })
+        .gte('lat', viewport.south)
+        .lte('lat', viewport.north)
+        .gte('long', viewport.west)
+        .lte('long', viewport.east)
+        .limit(VIEWPORT_LIMIT)
 
       if (error) {
         setErrorMessage(error.message)
+        setAddresses([])
+        setFetchedAddressCount(0)
+        setHitViewportLimit(false)
       } else {
-        setAddresses((data as AddressRow[]) ?? [])
+        const rows = (data as AddressRow[]) ?? []
+        const matchedCount = count ?? rows.length
+        setFetchedAddressCount(matchedCount)
+        setHitViewportLimit(matchedCount > rows.length)
+        setAddresses(rows)
       }
 
       setIsMapLoading(false)
     }
 
-    void fetchAddresses()
-  }, [session, role])
+    const timer = window.setTimeout(() => {
+      void fetchAddresses()
+    }, 220)
+    return () => window.clearTimeout(timer)
+  }, [session, role, viewport])
 
   useEffect(() => {
     void refreshAccessList()
   }, [role, session])
 
   const centerPoint = useMemo<[number, number]>(() => RURAL_HALL_CENTER, [])
+  const isCloseZoom = (viewport?.zoom ?? 13) >= 17
 
   const toggleCanvassed = async (address: AddressRow) => {
     if (!supabase) {
@@ -488,7 +558,7 @@ function App() {
         <p>
           {isMapLoading
             ? 'Loading addresses...'
-            : `${validAddresses.length} addresses loaded · ${role || 'unknown role'}`}
+            : `${validAddresses.length} rendered in view (${fetchedAddressCount} matched, ${filteredOutCount} filtered) · ${role || 'unknown role'}`}
         </p>
         <button type="button" className="signout-button" onClick={() => void signOut()}>
           Sign out
@@ -515,43 +585,65 @@ function App() {
       )}
 
       {errorMessage && <p className="error-banner">{errorMessage}</p>}
+      {hitViewportLimit && (
+        <p className="error-banner">
+          Too many points in this view; showing first {VIEWPORT_LIMIT}. Zoom in for full detail.
+        </p>
+      )}
 
       {(role !== 'admin' || activeAdminView === 'map') && (
         <section className="map-page">
           <section className="map-panel">
             <MapContainer center={centerPoint} zoom={13} scrollWheelZoom className="map-view">
+              <MapViewportWatcher onViewportChange={setViewport} />
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
               {validAddresses.map((address) => (
-                <CircleMarker
-                  key={address.id}
-                  center={[address.lat, address.long]}
-                  radius={6}
-                  pathOptions={{
-                    color: address.canvassed ? '#2e7d32' : '#b91c1c',
-                    fillColor: address.canvassed ? '#4caf50' : '#ef5350',
-                    fillOpacity: 0.9,
-                    weight: 1,
-                  }}
-                >
-                  <Popup>
-                    <p className="popup-address">{address.full_address}</p>
-                    <button
-                      type="button"
-                      className="status-button"
-                      disabled={role !== 'admin'}
-                      onClick={() => void toggleCanvassed(address)}
-                    >
-                      {role === 'admin'
-                        ? address.canvassed
-                          ? 'Mark uncanvassed'
-                          : 'Mark canvassed'
-                        : 'Read only (canvasser permissions next phase)'}
-                    </button>
-                  </Popup>
-                </CircleMarker>
+                <Fragment key={`${address.id}-group`}>
+                  {address.canvassed && (
+                    <CircleMarker
+                      key={`${address.id}-halo`}
+                      center={[address.lat, address.long]}
+                      radius={isCloseZoom ? 20 : 13}
+                      interactive={false}
+                      pathOptions={{
+                        color: '#1d4ed8',
+                        fillColor: '#60a5fa',
+                        fillOpacity: 0.2,
+                        weight: 2,
+                      }}
+                    />
+                  )}
+                  <CircleMarker
+                    key={address.id}
+                    center={[address.lat, address.long]}
+                    radius={address.canvassed ? 8 : 7}
+                    pathOptions={{
+                      color: address.canvassed ? '#ffffff' : '#7f1d1d',
+                      fillColor: address.canvassed ? '#2563eb' : '#dc2626',
+                      fillOpacity: 1,
+                      weight: address.canvassed ? 3 : 2,
+                    }}
+                  >
+                    <Popup>
+                      <p className="popup-address">{address.full_address}</p>
+                      <button
+                        type="button"
+                        className="status-button"
+                        disabled={role !== 'admin'}
+                        onClick={() => void toggleCanvassed(address)}
+                      >
+                        {role === 'admin'
+                          ? address.canvassed
+                            ? 'Mark uncanvassed'
+                            : 'Mark canvassed'
+                          : 'Read only (canvasser permissions next phase)'}
+                      </button>
+                    </Popup>
+                  </CircleMarker>
+                </Fragment>
               ))}
             </MapContainer>
           </section>
