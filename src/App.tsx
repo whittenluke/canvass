@@ -70,6 +70,11 @@ type AdminMarkGeofenceResultRow = {
   already_canvassed: number
   total_count: number
 }
+type AdminGeofenceProgressRow = {
+  total_count: number
+  canvassed_count: number
+  remaining_count: number
+}
 
 async function fetchAddressStatsInsidePolygon(
   client: SupabaseClientNonNull,
@@ -860,6 +865,7 @@ function App() {
   const [markAllTargetCanvassed, setMarkAllTargetCanvassed] = useState(true)
   const [geofencePanelMenuOpen, setGeofencePanelMenuOpen] = useState(false)
   const geofencePanelMenuRef = useRef<HTMLDivElement>(null)
+  const mapRef = useRef<L.Map | null>(null)
   const [dotsEnabled, setDotsEnabled] = useState(true)
   const [addressPopupOpenId, setAddressPopupOpenId] = useState<string | null>(null)
   const [nearbyAddressSheet, setNearbyAddressSheet] = useState<{ memberIds: string[] } | null>(null)
@@ -1359,7 +1365,21 @@ function App() {
     const run = async () => {
       setIsGeofenceProgressLoading(true)
       try {
-        const p = await fetchAddressStatsInsidePolygon(supabase, fence.geometry)
+        const { data, error } = await supabase.rpc('admin_get_geofence_progress', {
+          p_geofence_id: selectedGeofenceId,
+        })
+        let p: GeofenceProgress
+        if (error) {
+          // Fallback keeps admin progress working before/if the RPC is deployed.
+          p = await fetchAddressStatsInsidePolygon(supabase, fence.geometry)
+        } else {
+          const row = ((data as AdminGeofenceProgressRow[] | null) ?? [])[0]
+          p = {
+            total: row?.total_count ?? 0,
+            canvassed: row?.canvassed_count ?? 0,
+            remaining: row?.remaining_count ?? 0,
+          }
+        }
         if (!cancelled) {
           setGeofenceProgress(p)
         }
@@ -1448,7 +1468,10 @@ function App() {
   const dotsVisibleMinZoom = role === 'admin' ? DOTS_VISIBLE_MIN_ZOOM_ADMIN : DOTS_VISIBLE_MIN_ZOOM_CANVASSER
   const showAddressDots = dotsEnabled && (viewport?.zoom ?? 13) >= dotsVisibleMinZoom
 
-  const toggleCanvassed = async (address: AddressRow) => {
+  const toggleCanvassed = async (
+    address: AddressRow,
+    options?: { closePopupOnToggle?: boolean },
+  ) => {
     if (!supabase) {
       setErrorMessage(missingSupabaseConfig)
       return
@@ -1460,6 +1483,10 @@ function App() {
     }
 
     const nextState = !address.canvassed
+    if (options?.closePopupOnToggle) {
+      mapRef.current?.closePopup()
+      setAddressPopupOpenId(null)
+    }
 
     if (role === 'canvasser') {
       const inMine = addressInAssignedGeofences(address, geofences, assignedGeofenceIdSet)
@@ -2076,7 +2103,13 @@ function App() {
       ) : (role !== 'admin' || activeAdminView === 'map') ? (
         <section className="map-page">
           <section className="map-panel">
-            <MapContainer center={centerPoint} zoom={13} scrollWheelZoom className="map-view">
+            <MapContainer
+              center={centerPoint}
+              zoom={13}
+              scrollWheelZoom
+              className="map-view"
+              ref={mapRef}
+            >
               <MapPaneSetup />
               {role === 'admin' && selectedGeofence && (
                 <div className="selected-geofence-chip">
@@ -2198,7 +2231,9 @@ function App() {
                           type="button"
                           className="status-button"
                           disabled={!canToggleThisAddress}
-                          onClick={() => void toggleCanvassed(address)}
+                          onClick={() =>
+                            void toggleCanvassed(address, { closePopupOnToggle: true })
+                          }
                         >
                           {role === 'admin'
                             ? address.canvassed
