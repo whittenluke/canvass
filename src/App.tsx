@@ -105,7 +105,12 @@ function CollapsibleStreetBlock({
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
-        <span className={nameClassName}>{heading}</span>
+        <span className="collapsible-street-heading-group">
+          <span className={nameClassName}>{heading}</span>
+          <span className="collapsible-street-chevron" aria-hidden="true">
+            {open ? '▲' : '▼'}
+          </span>
+        </span>
         <span className={metaClassName}>{meta}</span>
       </button>
       {open ? <div className="collapsible-street-panel">{children}</div> : null}
@@ -468,6 +473,27 @@ function GeofenceTrashIcon() {
   )
 }
 
+function MapHelpInfoIcon() {
+  return (
+    <svg
+      className="map-help-info-svg"
+      viewBox="0 0 24 24"
+      width="20"
+      height="20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 16v-5" />
+      <path d="M12 8h.01" />
+    </svg>
+  )
+}
+
 function NearbyAddressSheet({
   memberIds,
   addresses,
@@ -609,6 +635,12 @@ function App() {
   const [canvasserListAddresses, setCanvasserListAddresses] = useState<AddressRow[] | null>(null)
   const [isCanvasserListLoading, setIsCanvasserListLoading] = useState(false)
   const [canvasserListFetchError, setCanvasserListFetchError] = useState('')
+  const [canvasserMobileAreasPanelExpanded, setCanvasserMobileAreasPanelExpanded] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.matchMedia('(min-width: 901px)').matches
+  })
+  const [canvasserMapHelpOpen, setCanvasserMapHelpOpen] = useState(false)
+  const canvasserMapHelpRef = useRef<HTMLDivElement>(null)
   const selectedGeofence = useMemo(
     () => geofences.find((fence) => fence.id === selectedGeofenceId) ?? null,
     [geofences, selectedGeofenceId],
@@ -899,7 +931,41 @@ function App() {
   }, [session, role])
 
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect -- full turf list for list + map metrics */
+    const mq = window.matchMedia('(max-width: 900px)')
+    const onChange = () => {
+      if (mq.matches) {
+        setCanvasserMobileAreasPanelExpanded(false)
+      }
+    }
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  useEffect(() => {
+    if (!canvasserMapHelpOpen) {
+      return
+    }
+    const onDocMouseDown = (event: MouseEvent) => {
+      const el = canvasserMapHelpRef.current
+      if (el && !el.contains(event.target as Node)) {
+        setCanvasserMapHelpOpen(false)
+      }
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setCanvasserMapHelpOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [canvasserMapHelpOpen])
+
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- full assigned-area address list for list + map metrics */
     if (role !== 'canvasser' || !supabase) {
       setCanvasserListAddresses(null)
       setCanvasserListFetchError('')
@@ -1552,14 +1618,11 @@ function App() {
                 />
               </div>
               <p className="canvasser-list-metrics-line">
-                {canvasserListProgress.total} in your zones · {canvasserListProgress.done} canvassed
+                {canvasserListProgress.total} in your assigned areas · {canvasserListProgress.done}{' '}
+                canvassed
               </p>
             </div>
           ) : null}
-          <p className="canvasser-list-lead">
-            Same data as the map, grouped by street (tap a street to expand or collapse). Mark from
-            the list or the map.
-          </p>
           {assignedGeofenceIdList.length === 0 ? (
             <p className="canvasser-list-empty">No geofences are assigned to your email yet.</p>
           ) : isCanvasserListLoading ? (
@@ -1570,11 +1633,11 @@ function App() {
             <p className="canvasser-list-empty">No addresses found inside your assigned geofences.</p>
           ) : (
             <div className="canvasser-list-body">
-              {canvasserStreetGroups.map((group, streetIndex) => (
+              {canvasserStreetGroups.map((group) => (
                 <CollapsibleStreetBlock
                   key={group.sortKey}
                   blockClassName="canvasser-street-block"
-                  defaultOpen={canvasserStreetGroups.length <= 5 || streetIndex < 3}
+                  defaultOpen={false}
                   summaryClassName="canvasser-street-summary"
                   nameClassName="canvasser-street-name"
                   metaClassName="canvasser-street-count"
@@ -1644,10 +1707,73 @@ function App() {
                 </div>
               )}
               {role === 'canvasser' && (
-                <div className="canvasser-map-hint">
-                  {assignedGeofenceIdList.length > 0
-                    ? 'Purple-shaded areas are yours. A numbered red badge means several addresses in one spot; tap it for a sliding list. Single dots: tap near the pin (large touch target) to open the card.'
-                    : 'No geofences are assigned to your email yet. Ask an admin to assign an area.'}
+                <div className="map-help-anchor" ref={canvasserMapHelpRef}>
+                  <button
+                    type="button"
+                    className="map-help-icon-button"
+                    aria-expanded={canvasserMapHelpOpen}
+                    aria-haspopup="dialog"
+                    aria-controls="canvasser-map-help-popover"
+                    onClick={() => setCanvasserMapHelpOpen((open) => !open)}
+                    aria-label="Map tips for assigned areas"
+                  >
+                    <MapHelpInfoIcon />
+                  </button>
+                  {canvasserMapHelpOpen ? (
+                    <div
+                      className="canvasser-map-help-popover"
+                      id="canvasser-map-help-popover"
+                      role="dialog"
+                      aria-label="Map tips"
+                    >
+                      <div className="canvasser-map-help-popover-header">
+                        <span>Map tips</span>
+                        <button
+                          type="button"
+                          className="canvasser-map-help-close"
+                          aria-label="Close map tips"
+                          onClick={() => setCanvasserMapHelpOpen(false)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                      {assignedGeofenceIdList.length > 0 ? (
+                        <ul className="canvasser-map-help-list">
+                          <li>
+                            <strong>Purple polygons</strong> show your assigned areas on the map.
+                          </li>
+                          <li>
+                            A <strong>numbered red badge</strong> means several addresses share one
+                            point. Tap it to open a scrollable list.
+                          </li>
+                          <li>
+                            You can mark addresses <strong>canvassed</strong> by clicking address
+                            dots, or by using the{' '}
+                            <button
+                              type="button"
+                              className="canvasser-map-help-link"
+                              aria-label="Open Address list tab"
+                              onClick={() => {
+                                setCanvasserUiView('list')
+                                setCanvasserMapHelpOpen(false)
+                              }}
+                            >
+                              Address list
+                            </button>
+                            .
+                          </li>
+                        </ul>
+                      ) : (
+                        <ul className="canvasser-map-help-list">
+                          <li>No geofences are assigned to your email yet.</li>
+                          <li>
+                            Ask an admin to assign areas. You will see polygons and address dots for
+                            your assigned areas after that.
+                          </li>
+                        </ul>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               )}
               <button
@@ -1840,57 +1966,108 @@ function App() {
             )}
           </section>
           {role === 'canvasser' && (
-            <aside className="geofence-panel canvasser-turf-panel" aria-label="Your assigned areas">
-              <div className="geofence-panel-header">
-                <h3>Your assigned areas</h3>
-              </div>
-              {assignedGeofenceIdList.length === 0 ? (
-                <p className="geofence-panel-lead">
-                  No geofences are assigned to your email yet. Ask an admin to assign an area.
-                </p>
-              ) : isCanvasserListLoading ? (
-                <p className="geofence-panel-lead">Loading addresses in your areas…</p>
-              ) : canvasserListFetchError ? (
-                <p className="error-banner">{canvasserListFetchError}</p>
-              ) : canvasserListProgress ? (
-                <div className="geofence-progress">
-                  <div className="progress-summary">
-                    <div className="progress-headline">
-                      <span>Complete</span>
-                      <strong>{canvasserListProgress.percent}%</strong>
-                    </div>
-                    <div
-                      className="progress-bar-track"
-                      role="progressbar"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={canvasserListProgress.percent}
-                      aria-valuetext={`${canvasserListProgress.done} of ${canvasserListProgress.total} addresses canvassed`}
-                    >
-                      <div
-                        className="progress-bar-fill canvasser-turf-progress-fill"
-                        style={{ width: `${canvasserListProgress.percent}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div className="metric-grid compact">
-                    <div className="metric-card emphasis canvasser-turf-metric-emphasis">
-                      <span>Remaining</span>
-                      <strong>{canvasserListProgress.total - canvasserListProgress.done}</strong>
-                    </div>
-                    <div className="metric-card canvasser-turf-metric">
-                      <span>Done</span>
-                      <strong>{canvasserListProgress.done}</strong>
-                    </div>
-                    <div className="metric-card canvasser-turf-metric">
-                      <span>Total</span>
-                      <strong>{canvasserListProgress.total}</strong>
-                    </div>
-                  </div>
+            <aside
+              className={`geofence-panel canvasser-areas-panel${
+                canvasserMobileAreasPanelExpanded ? ' canvasser-areas-panel--expanded' : ''
+              }`}
+              aria-label="Your assigned areas"
+            >
+              <button
+                type="button"
+                className="canvasser-areas-mobile-strip"
+                aria-expanded={canvasserMobileAreasPanelExpanded}
+                aria-controls="canvasser-areas-expandable"
+                onClick={() => setCanvasserMobileAreasPanelExpanded((open) => !open)}
+                aria-label={
+                  canvasserMobileAreasPanelExpanded
+                    ? 'Hide assigned areas breakdown'
+                    : 'Show assigned areas breakdown, counts and progress'
+                }
+              >
+                <div className="canvasser-areas-strip-row">
+                  <span className="canvasser-areas-strip-title">Assigned areas</span>
+                  {assignedGeofenceIdList.length === 0 ? (
+                    <span className="canvasser-areas-strip-meta">No area assigned</span>
+                  ) : isCanvasserListLoading ? (
+                    <span className="canvasser-areas-strip-meta">Loading…</span>
+                  ) : canvasserListFetchError ? (
+                    <span className="canvasser-areas-strip-meta">Error · tap for details</span>
+                  ) : canvasserListProgress ? (
+                    <span className="canvasser-areas-strip-meta">
+                      {canvasserListProgress.done}/{canvasserListProgress.total} canvassed ·{' '}
+                      {canvasserListProgress.percent}%
+                    </span>
+                  ) : (
+                    <span className="canvasser-areas-strip-meta">0/0 canvassed</span>
+                  )}
+                  <span className="canvasser-areas-strip-chevron" aria-hidden="true">
+                    {canvasserMobileAreasPanelExpanded ? '▲' : '▼'}
+                  </span>
                 </div>
-              ) : (
-                <p className="geofence-panel-lead">No addresses found inside your assigned geofences.</p>
-              )}
+                {assignedGeofenceIdList.length > 0 &&
+                !isCanvasserListLoading &&
+                !canvasserListFetchError ? (
+                  <div className="canvasser-areas-strip-bar" aria-hidden="true">
+                    <div
+                      className="canvasser-areas-strip-bar-fill"
+                      style={{ width: `${canvasserListProgress?.percent ?? 0}%` }}
+                    />
+                  </div>
+                ) : null}
+              </button>
+
+              <div id="canvasser-areas-expandable" className="canvasser-areas-expandable">
+                <div className="geofence-panel-header canvasser-areas-panel-title-row">
+                  <h3>Your assigned areas</h3>
+                </div>
+                {assignedGeofenceIdList.length === 0 ? (
+                  <p className="geofence-panel-lead">
+                    No geofences are assigned to your email yet. Ask an admin to assign an area.
+                  </p>
+                ) : isCanvasserListLoading ? (
+                  <p className="geofence-panel-lead">Loading addresses in your areas…</p>
+                ) : canvasserListFetchError ? (
+                  <p className="error-banner">{canvasserListFetchError}</p>
+                ) : canvasserListProgress ? (
+                  <div className="geofence-progress">
+                    <div className="progress-summary">
+                      <div className="progress-headline">
+                        <span>Canvassed</span>
+                        <strong>{canvasserListProgress.percent}%</strong>
+                      </div>
+                      <div
+                        className="progress-bar-track"
+                        role="progressbar"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={canvasserListProgress.percent}
+                        aria-valuetext={`${canvasserListProgress.done} of ${canvasserListProgress.total} addresses canvassed`}
+                      >
+                        <div
+                          className="progress-bar-fill canvasser-areas-progress-fill"
+                          style={{ width: `${canvasserListProgress.percent}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="metric-grid compact">
+                      <div className="metric-card emphasis canvasser-areas-metric-emphasis">
+                        <span>Remaining</span>
+                        <strong>{canvasserListProgress.total - canvasserListProgress.done}</strong>
+                      </div>
+                      <div className="metric-card canvasser-areas-metric">
+                        <span>Done</span>
+                        <strong>{canvasserListProgress.done}</strong>
+                      </div>
+                      <div className="metric-card canvasser-areas-metric">
+                        <span>Total</span>
+                        <strong>{canvasserListProgress.total}</strong>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="geofence-panel-lead">No addresses found inside your assigned geofences.</p>
+                )}
+              </div>
             </aside>
           )}
           {role === 'admin' && (
