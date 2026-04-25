@@ -144,12 +144,188 @@
   border-color: #334e68;
 }
 
+.canvasser-view-nav {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #d9e2ec;
+  background: #fff;
+}
+
+.canvasser-list-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 1rem 1.25rem;
+  max-width: 720px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.canvasser-list-toolbar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.canvasser-list-title {
+  margin: 0;
+  font-size: 1.15rem;
+  color: #102a43;
+}
+
+.canvasser-list-progress {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #334e68;
+}
+
+.canvasser-list-progress-wrap {
+  margin: 0 0 0.6rem;
+}
+
+.canvasser-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.canvasser-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+  transition: width 0.2s ease;
+}
+
+.canvasser-list-metrics-line {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.canvasser-list-lead {
+  margin: 0.35rem 0 0.85rem;
+  font-size: 0.88rem;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.canvasser-list-empty {
+  margin: 1rem 0 0;
+  color: #64748b;
+  font-size: 0.92rem;
+}
+
+.canvasser-list-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+  padding-bottom: 0.25rem;
+}
+
+.canvasser-street-block {
+  flex-shrink: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.canvasser-street-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.75rem;
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #102a43;
+  text-align: left;
+  border: 0;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, #f1f5f9 0%, #e8eef4 100%);
+}
+
+.collapsible-street-panel {
+  flex-shrink: 0;
+  min-height: min-content;
+  border-top: 1px solid #e2e8f0;
+}
+
+.canvasser-street-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvasser-street-count {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #334e68;
+  white-space: nowrap;
+}
+
+.canvasser-street-ul {
+  list-style: none;
+  margin: 0;
+  padding: 0 0.45rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  flex-shrink: 0;
+}
+
+.canvasser-list-row {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 0.45rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.canvasser-list-row-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.canvasser-list-address {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #0f172a;
+  flex: 1;
+  min-width: 0;
+}
+
 .map-page {
   flex: 1;
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
-  grid-template-rows: 36px 1fr;
+  grid-template-rows: auto 1fr;
   gap: 0.75rem;
   padding: 0.75rem;
 }
@@ -158,13 +334,13 @@
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   background: #f8fafc;
-  padding: 0 0.6rem;
-  height: 36px;
+  padding: 0.35rem 0.6rem;
   min-height: 36px;
-  max-height: 36px;
   overflow: hidden;
 }
 
@@ -173,7 +349,7 @@
   font-size: 0.82rem;
   color: #334155;
   min-width: 0;
-  flex: 1;
+  flex: 1 1 140px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -238,9 +414,9 @@
   top: 12px;
   left: 12px;
   max-width: min(420px, calc(100% - 56px));
-  border: 1px solid #a7f3d0;
-  background: rgba(236, 253, 245, 0.96);
-  color: #065f46;
+  border: 1px solid #c4b5fd;
+  background: rgba(245, 243, 255, 0.97);
+  color: #5b21b6;
   border-radius: 10px;
   padding: 0.45rem 0.6rem;
   font-size: 0.8rem;
@@ -254,7 +430,7 @@
   font-weight: 600;
 }
 
-/* Canvasser: invisible Leaflet circle — large pixel radius for touch; keep barely non-zero fill for hit testing. */
+/* Canvasser: invisible Leaflet circle: large pixel radius for touch; keep barely non-zero fill for hit testing. */
 .leaflet-interactive.address-marker-hit {
   cursor: pointer;
 }
@@ -362,20 +538,75 @@
   color: #64748b;
 }
 
+.nearby-sheet-streets {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: min(52vh, 420px);
+}
+
+.nearby-sheet-street {
+  flex-shrink: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+.nearby-sheet-street-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.5rem;
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.86rem;
+  color: #102a43;
+  text-align: left;
+  border: 0;
+  flex-shrink: 0;
+  background: #eef2f6;
+}
+
+.nearby-sheet-street-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nearby-sheet-street-meta {
+  flex-shrink: 0;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #334e68;
+  white-space: nowrap;
+}
+
 .nearby-sheet-list {
   list-style: none;
   margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  max-height: min(52vh, 420px);
+  padding: 0 0.45rem 0.45rem;
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+  flex-shrink: 0;
 }
 
 .nearby-sheet-row {
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   gap: 0.45rem;
   padding: 0.55rem 0.65rem;
   border: 1px solid #e2e8f0;
@@ -628,6 +859,41 @@
   min-width: 0;
   color: #102a43;
   font-size: 1.05rem;
+}
+
+.geofence-panel-lead {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #486581;
+  line-height: 1.45;
+}
+
+.canvasser-turf-panel .progress-summary {
+  border-color: #c4b5fd;
+  background: #f5f3ff;
+}
+
+.canvasser-turf-panel .progress-bar-track {
+  background: #ede9fe;
+}
+
+.canvasser-turf-progress-fill {
+  background: linear-gradient(90deg, #a78bfa, #7c3aed);
+  transition: width 180ms ease;
+}
+
+.canvasser-turf-panel .progress-headline strong {
+  color: #5b21b6;
+}
+
+.canvasser-turf-panel .metric-card.canvasser-turf-metric {
+  border-color: #ddd6fe;
+  background: #faf5ff;
+}
+
+.canvasser-turf-panel .metric-card.emphasis.canvasser-turf-metric-emphasis {
+  border-color: #c4b5fd;
+  background: #ede9fe;
 }
 
 .geofence-delete-icon {

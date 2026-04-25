@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { FormEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import {
@@ -62,6 +62,85 @@ function addressInAssignedGeofences(
       assignedGeofenceIdSet.has(g.id) &&
       booleanPointInPolygon(point([address.long, address.lat]), g.geometry),
   )
+}
+
+/** First line of address with leading house number stripped, for grouping and headers. */
+function streetHeadingFromFullAddress(fullAddress: string): string {
+  const firstLine = fullAddress.split(',')[0]?.trim() ?? fullAddress.trim()
+  const stripped = firstLine.replace(/^(\d+[A-Za-z]?(?:\s*-\s*\d+[A-Za-z]?)?)\s+/, '').trim()
+  return stripped || firstLine
+}
+
+type StreetAddressGroup = {
+  sortKey: string
+  heading: string
+  rows: AddressRow[]
+}
+
+function CollapsibleStreetBlock({
+  blockClassName,
+  defaultOpen,
+  summaryClassName,
+  nameClassName,
+  metaClassName,
+  heading,
+  meta,
+  children,
+}: {
+  blockClassName: string
+  defaultOpen: boolean
+  summaryClassName: string
+  nameClassName: string
+  metaClassName: string
+  heading: string
+  meta: string
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className={blockClassName}>
+      <button
+        type="button"
+        className={summaryClassName}
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className={nameClassName}>{heading}</span>
+        <span className={metaClassName}>{meta}</span>
+      </button>
+      {open ? <div className="collapsible-street-panel">{children}</div> : null}
+    </div>
+  )
+}
+
+function buildStreetGroups(addresses: AddressRow[]): StreetAddressGroup[] {
+  const bucket = new Map<string, { heading: string; rows: AddressRow[]; seen: Set<string> }>()
+  for (const row of addresses) {
+    const heading = streetHeadingFromFullAddress(row.full_address)
+    const sortKey = heading.toLowerCase()
+    let g = bucket.get(sortKey)
+    if (!g) {
+      g = { heading, rows: [], seen: new Set() }
+      bucket.set(sortKey, g)
+    }
+    if (g.seen.has(row.id)) {
+      continue
+    }
+    g.seen.add(row.id)
+    g.rows.push(row)
+  }
+  const groups: StreetAddressGroup[] = [...bucket.entries()].map(([sortKey, g]) => ({
+    sortKey,
+    heading: g.heading,
+    rows: g.rows,
+  }))
+    .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+  for (const g of groups) {
+    g.rows.sort((x, y) =>
+      x.full_address.localeCompare(y.full_address, undefined, { numeric: true }),
+    )
+  }
+  return groups
 }
 
 function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -148,7 +227,7 @@ function mergeClustersByCrossGap(clusters: AddressRow[][], maxGapM: number): Add
   return list
 }
 
-/** New icon per marker — Leaflet must not reuse one DivIcon instance across multiple markers. */
+/** New icon per marker: Leaflet must not reuse one DivIcon instance across multiple markers. */
 function createClusterCountIcon(count: number): L.DivIcon {
   return L.divIcon({
     className: 'address-cluster-leaflet-marker',
@@ -162,7 +241,7 @@ const RURAL_HALL_CENTER: [number, number] = [36.2413, -80.2937]
 const APP_ROLES = new Set(['admin', 'canvasser'])
 const VIEWPORT_LIMIT = 4000
 const DOTS_VISIBLE_MIN_ZOOM = 15
-/** Canvasser: invisible CircleMarker radius (px) — much larger than the visible dot for finger taps. */
+/** Canvasser: invisible CircleMarker radius (px), much larger than the visible dot for finger taps. */
 const CANVASSER_ADDRESS_HIT_RADIUS_PX = 26
 /** First pass: union pairs within this distance (m). */
 const ADDRESS_CLUSTER_MERGE_METERS = 12
@@ -277,10 +356,10 @@ function GeofenceDrawManager({
         fillColor = isSelected ? '#93c5fd' : '#94a3b8'
         fillOpacity = isSelected ? 0.2 : 0.1
       } else if (assignedGeofenceIdList.length > 0) {
-        color = isMine ? '#047857' : '#94a3b8'
+        color = isMine ? '#5b21b6' : '#94a3b8'
         weight = isMine ? 3 : 1.5
-        fillColor = isMine ? '#6ee7b7' : '#cbd5e1'
-        fillOpacity = isMine ? 0.24 : 0.07
+        fillColor = isMine ? '#ddd6fe' : '#cbd5e1'
+        fillOpacity = isMine ? 0.34 : 0.07
       } else {
         color = '#94a3b8'
         weight = 1.5
@@ -413,6 +492,7 @@ function NearbyAddressSheet({
         .filter((a): a is AddressRow => a != null),
     [memberIds, addresses],
   )
+  const sheetStreetGroups = useMemo(() => buildStreetGroups(rows), [rows])
 
   return (
     <div
@@ -438,42 +518,57 @@ function NearbyAddressSheet({
           </button>
         </div>
         <p className="nearby-sheet-subtitle">
-          {rows.length} at this spot — mark each unit as you go.
+          {rows.length} at this spot, grouped by street. Mark each unit as you go.
         </p>
-        <ul className="nearby-sheet-list">
-          {rows.map((address) => {
-            const canToggle =
-              role === 'admin' ||
-              (role === 'canvasser' &&
-                addressInAssignedGeofences(address, geofences, assignedGeofenceIdSet))
-            return (
-              <li key={address.id} className="nearby-sheet-row">
-                <div className="nearby-sheet-row-text">
-                  <span className="nearby-sheet-address">{address.full_address}</span>
-                  <span className={`nearby-sheet-pill ${address.canvassed ? 'done' : 'todo'}`}>
-                    {address.canvassed ? 'Canvassed' : 'Not canvassed'}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="nearby-sheet-action"
-                  disabled={!canToggle}
-                  onClick={() => void onToggle(address)}
-                >
-                  {role === 'admin'
-                    ? address.canvassed
-                      ? 'Mark uncanvassed'
-                      : 'Mark canvassed'
-                    : canToggle
-                      ? address.canvassed
-                        ? 'Mark uncanvassed'
-                        : 'Mark canvassed'
-                      : 'Outside your areas'}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
+        <div className="nearby-sheet-streets">
+          {sheetStreetGroups.map((group, streetIndex) => (
+            <CollapsibleStreetBlock
+              key={group.sortKey}
+              blockClassName="nearby-sheet-street"
+              defaultOpen={sheetStreetGroups.length <= 4 || streetIndex < 2}
+              summaryClassName="nearby-sheet-street-summary"
+              nameClassName="nearby-sheet-street-name"
+              metaClassName="nearby-sheet-street-meta"
+              heading={group.heading}
+              meta={`${group.rows.filter((a) => a.canvassed).length}/${group.rows.length} done`}
+            >
+              <ul className="nearby-sheet-list">
+                {group.rows.map((address) => {
+                  const canToggle =
+                    role === 'admin' ||
+                    (role === 'canvasser' &&
+                      addressInAssignedGeofences(address, geofences, assignedGeofenceIdSet))
+                  return (
+                    <li key={address.id} className="nearby-sheet-row">
+                      <div className="nearby-sheet-row-text">
+                        <span className="nearby-sheet-address">{address.full_address}</span>
+                        <span className={`nearby-sheet-pill ${address.canvassed ? 'done' : 'todo'}`}>
+                          {address.canvassed ? 'Canvassed' : 'Not canvassed'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="nearby-sheet-action"
+                        disabled={!canToggle}
+                        onClick={() => void onToggle(address)}
+                      >
+                        {role === 'admin'
+                          ? address.canvassed
+                            ? 'Mark uncanvassed'
+                            : 'Mark canvassed'
+                          : canToggle
+                            ? address.canvassed
+                              ? 'Mark uncanvassed'
+                              : 'Mark canvassed'
+                            : 'Outside your areas'}
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </CollapsibleStreetBlock>
+          ))}
+        </div>
       </div>
     </div>
   )
@@ -510,6 +605,10 @@ function App() {
   const [dotsEnabled, setDotsEnabled] = useState(true)
   const [addressPopupOpenId, setAddressPopupOpenId] = useState<string | null>(null)
   const [nearbyAddressSheet, setNearbyAddressSheet] = useState<{ memberIds: string[] } | null>(null)
+  const [canvasserUiView, setCanvasserUiView] = useState<'map' | 'list'>('map')
+  const [canvasserListAddresses, setCanvasserListAddresses] = useState<AddressRow[] | null>(null)
+  const [isCanvasserListLoading, setIsCanvasserListLoading] = useState(false)
+  const [canvasserListFetchError, setCanvasserListFetchError] = useState('')
   const selectedGeofence = useMemo(
     () => geofences.find((fence) => fence.id === selectedGeofenceId) ?? null,
     [geofences, selectedGeofenceId],
@@ -551,13 +650,47 @@ function App() {
       ),
     [addresses],
   )
+  /** Canvassers: only dots inside assigned geofences. No assignment → no dots. Admins: all in view. */
+  const addressesForMapDots = useMemo(() => {
+    if (role !== 'canvasser') {
+      return validAddresses
+    }
+    if (assignedGeofenceIdList.length === 0) {
+      return []
+    }
+    return validAddresses.filter((address) =>
+      addressInAssignedGeofences(address, geofences, assignedGeofenceIdSet),
+    )
+  }, [role, validAddresses, assignedGeofenceIdList, geofences, assignedGeofenceIdSet])
   const addressClustersForMap = useMemo(() => {
-    const linked = clusterAddressesByProximity(validAddresses, ADDRESS_CLUSTER_MERGE_METERS)
+    const linked = clusterAddressesByProximity(addressesForMapDots, ADDRESS_CLUSTER_MERGE_METERS)
     const merged = mergeClustersByCrossGap(linked, ADDRESS_CLUSTER_CROSS_GAP_METERS)
     const singles = merged.filter((c) => c.length === 1)
     const multi = merged.filter((c) => c.length > 1)
     return [...singles, ...multi]
-  }, [validAddresses])
+  }, [addressesForMapDots])
+  const canvasserListRowsLive = useMemo(() => {
+    if (!canvasserListAddresses) return []
+    const byId = new Map<string, AddressRow>()
+    for (const row of canvasserListAddresses) {
+      const merged = addresses.find((a) => a.id === row.id) ?? row
+      byId.set(row.id, merged)
+    }
+    return Array.from(byId.values()).sort((a, b) =>
+      a.full_address.localeCompare(b.full_address, undefined, { numeric: true }),
+    )
+  }, [canvasserListAddresses, addresses])
+  const canvasserListProgress = useMemo(() => {
+    const rows = canvasserListRowsLive
+    if (rows.length === 0) return null
+    const done = rows.filter((r) => r.canvassed).length
+    const total = rows.length
+    return { done, total, percent: Math.round((done / total) * 100) }
+  }, [canvasserListRowsLive])
+  const canvasserStreetGroups = useMemo(
+    () => buildStreetGroups(canvasserListRowsLive),
+    [canvasserListRowsLive],
+  )
   const adminCount = useMemo(
     () => accessRows.filter((entry) => entry.role === 'admin').length,
     [accessRows],
@@ -764,6 +897,96 @@ function App() {
     }
     void fetchGeofences()
   }, [session, role])
+
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- full turf list for list + map metrics */
+    if (role !== 'canvasser' || !supabase) {
+      setCanvasserListAddresses(null)
+      setCanvasserListFetchError('')
+      setIsCanvasserListLoading(false)
+      return
+    }
+    if (assignedGeofenceIdList.length === 0) {
+      setCanvasserListAddresses([])
+      setCanvasserListFetchError('')
+      setIsCanvasserListLoading(false)
+      return
+    }
+
+    const fences = geofences.filter((g) => assignedGeofenceIdList.includes(g.id))
+    if (fences.length === 0) {
+      setCanvasserListAddresses([])
+      setIsCanvasserListLoading(false)
+      return
+    }
+
+    let minLat = Infinity
+    let maxLat = -Infinity
+    let minLng = Infinity
+    let maxLng = -Infinity
+    for (const f of fences) {
+      const ring = f.geometry.coordinates[0] ?? []
+      for (const [lng, lat] of ring) {
+        minLat = Math.min(minLat, lat)
+        maxLat = Math.max(maxLat, lat)
+        minLng = Math.min(minLng, lng)
+        maxLng = Math.max(maxLng, lng)
+      }
+    }
+
+    let cancelled = false
+    setIsCanvasserListLoading(true)
+    setCanvasserListFetchError('')
+
+    const run = async () => {
+      const byId = new Map<string, AddressRow>()
+      let from = 0
+      const pageSize = 1000
+      let done = false
+      while (!done && !cancelled) {
+        const { data, error } = await supabase
+          .from('addresses')
+          .select('id,full_address,lat,long,canvassed')
+          .gte('lat', minLat)
+          .lte('lat', maxLat)
+          .gte('long', minLng)
+          .lte('long', maxLng)
+          .range(from, from + pageSize - 1)
+        if (error) {
+          if (!cancelled) {
+            setCanvasserListFetchError(error.message)
+            setCanvasserListAddresses([])
+            setIsCanvasserListLoading(false)
+          }
+          break
+        }
+        const rows = (data as AddressRow[]) ?? []
+        for (const row of rows) {
+          if (
+            !byId.has(row.id) &&
+            fences.some((f) => booleanPointInPolygon(point([row.long, row.lat]), f.geometry))
+          ) {
+            byId.set(row.id, row)
+          }
+        }
+        if (rows.length < pageSize) done = true
+        else from += pageSize
+      }
+      if (!cancelled) {
+        const list = Array.from(byId.values()).sort((a, b) =>
+          a.full_address.localeCompare(b.full_address),
+        )
+        setCanvasserListAddresses(list)
+        setIsCanvasserListLoading(false)
+      }
+    }
+
+    void run()
+    /* eslint-enable react-hooks/set-state-in-effect */
+    return () => {
+      cancelled = true
+    }
+  }, [role, assignedGeofenceIdList, geofences])
 
   useEffect(() => {
     if (!selectedGeofence) {
@@ -982,7 +1205,13 @@ function App() {
     setIsSendingLink(false)
 
     if (error) {
-      setAuthMessage(error.message)
+      const raw = error.message
+      const signupsBlocked = /signups not allowed/i.test(raw)
+      setAuthMessage(
+        signupsBlocked
+          ? 'Your email is already in Admin Access (the app database), but Supabase Auth is blocking the first magic link because it would create a new login user. In Supabase Dashboard → Authentication → Email: allow new sign-ups, or add each person under Authentication → Users (invite), then send the magic link again.'
+          : raw,
+      )
       return
     }
 
@@ -1271,9 +1500,126 @@ function App() {
         </nav>
       )}
 
+      {role === 'canvasser' && (
+        <nav className="canvasser-view-nav" aria-label="Canvasser views">
+          <button
+            type="button"
+            className={canvasserUiView === 'map' ? 'view-tab active' : 'view-tab'}
+            onClick={() => setCanvasserUiView('map')}
+          >
+            Map
+          </button>
+          <button
+            type="button"
+            className={canvasserUiView === 'list' ? 'view-tab active' : 'view-tab'}
+            onClick={() => setCanvasserUiView('list')}
+          >
+            Address list
+          </button>
+        </nav>
+      )}
+
       {errorMessage && <p className="error-banner">{errorMessage}</p>}
 
-      {(role !== 'admin' || activeAdminView === 'map') && (
+      {role === 'canvasser' && canvasserUiView === 'list' ? (
+        <section className="canvasser-list-page" aria-label="Addresses in your assigned areas">
+          <div className="canvasser-list-toolbar">
+            <h2 className="canvasser-list-title">Your addresses</h2>
+            {canvasserListProgress ? (
+              <span className="canvasser-list-progress">
+                {canvasserListProgress.done}/{canvasserListProgress.total} ·{' '}
+                {canvasserListProgress.percent}%
+              </span>
+            ) : null}
+          </div>
+          {canvasserListProgress ? (
+            <div
+              className="canvasser-list-progress-wrap"
+              role="group"
+              aria-label="Progress in your assigned geofences"
+            >
+              <div
+                className="canvasser-progress-track"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={canvasserListProgress.percent}
+                aria-valuetext={`${canvasserListProgress.done} of ${canvasserListProgress.total} addresses canvassed`}
+              >
+                <div
+                  className="canvasser-progress-fill"
+                  style={{ width: `${canvasserListProgress.percent}%` }}
+                />
+              </div>
+              <p className="canvasser-list-metrics-line">
+                {canvasserListProgress.total} in your zones · {canvasserListProgress.done} canvassed
+              </p>
+            </div>
+          ) : null}
+          <p className="canvasser-list-lead">
+            Same data as the map, grouped by street (tap a street to expand or collapse). Mark from
+            the list or the map.
+          </p>
+          {assignedGeofenceIdList.length === 0 ? (
+            <p className="canvasser-list-empty">No geofences are assigned to your email yet.</p>
+          ) : isCanvasserListLoading ? (
+            <p className="canvasser-list-empty">Loading addresses in your areas…</p>
+          ) : canvasserListFetchError ? (
+            <p className="error-banner">{canvasserListFetchError}</p>
+          ) : canvasserListRowsLive.length === 0 ? (
+            <p className="canvasser-list-empty">No addresses found inside your assigned geofences.</p>
+          ) : (
+            <div className="canvasser-list-body">
+              {canvasserStreetGroups.map((group, streetIndex) => (
+                <CollapsibleStreetBlock
+                  key={group.sortKey}
+                  blockClassName="canvasser-street-block"
+                  defaultOpen={canvasserStreetGroups.length <= 5 || streetIndex < 3}
+                  summaryClassName="canvasser-street-summary"
+                  nameClassName="canvasser-street-name"
+                  metaClassName="canvasser-street-count"
+                  heading={group.heading}
+                  meta={`${group.rows.filter((r) => r.canvassed).length}/${group.rows.length} canvassed`}
+                >
+                  <ul className="canvasser-street-ul">
+                    {group.rows.map((address) => {
+                      const canToggle = addressInAssignedGeofences(
+                        address,
+                        geofences,
+                        assignedGeofenceIdSet,
+                      )
+                      return (
+                        <li key={address.id} className="canvasser-list-row">
+                          <div className="canvasser-list-row-main">
+                            <span className="canvasser-list-address">{address.full_address}</span>
+                            <span
+                              className={`nearby-sheet-pill ${address.canvassed ? 'done' : 'todo'}`}
+                            >
+                              {address.canvassed ? 'Canvassed' : 'Not canvassed'}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className="nearby-sheet-action"
+                            disabled={!canToggle}
+                            onClick={() => void toggleCanvassed(address)}
+                          >
+                            {canToggle
+                              ? address.canvassed
+                                ? 'Mark uncanvassed'
+                                : 'Mark canvassed'
+                              : 'Outside your areas'}
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </CollapsibleStreetBlock>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : (role !== 'admin' || activeAdminView === 'map') ? (
         <section className="map-page">
           <div className="map-status-line">
             {!dotsEnabled ? (
@@ -1300,7 +1646,7 @@ function App() {
               {role === 'canvasser' && (
                 <div className="canvasser-map-hint">
                   {assignedGeofenceIdList.length > 0
-                    ? 'Green areas are yours. A numbered red badge means several addresses in one spot — tap it for a sliding list. Single dots: tap near the pin (large touch target) to open the card.'
+                    ? 'Purple-shaded areas are yours. A numbered red badge means several addresses in one spot; tap it for a sliding list. Single dots: tap near the pin (large touch target) to open the card.'
                     : 'No geofences are assigned to your email yet. Ask an admin to assign an area.'}
                 </div>
               )}
@@ -1493,6 +1839,60 @@ function App() {
               />
             )}
           </section>
+          {role === 'canvasser' && (
+            <aside className="geofence-panel canvasser-turf-panel" aria-label="Your assigned areas">
+              <div className="geofence-panel-header">
+                <h3>Your assigned areas</h3>
+              </div>
+              {assignedGeofenceIdList.length === 0 ? (
+                <p className="geofence-panel-lead">
+                  No geofences are assigned to your email yet. Ask an admin to assign an area.
+                </p>
+              ) : isCanvasserListLoading ? (
+                <p className="geofence-panel-lead">Loading addresses in your areas…</p>
+              ) : canvasserListFetchError ? (
+                <p className="error-banner">{canvasserListFetchError}</p>
+              ) : canvasserListProgress ? (
+                <div className="geofence-progress">
+                  <div className="progress-summary">
+                    <div className="progress-headline">
+                      <span>Complete</span>
+                      <strong>{canvasserListProgress.percent}%</strong>
+                    </div>
+                    <div
+                      className="progress-bar-track"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={canvasserListProgress.percent}
+                      aria-valuetext={`${canvasserListProgress.done} of ${canvasserListProgress.total} addresses canvassed`}
+                    >
+                      <div
+                        className="progress-bar-fill canvasser-turf-progress-fill"
+                        style={{ width: `${canvasserListProgress.percent}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="metric-grid compact">
+                    <div className="metric-card emphasis canvasser-turf-metric-emphasis">
+                      <span>Remaining</span>
+                      <strong>{canvasserListProgress.total - canvasserListProgress.done}</strong>
+                    </div>
+                    <div className="metric-card canvasser-turf-metric">
+                      <span>Done</span>
+                      <strong>{canvasserListProgress.done}</strong>
+                    </div>
+                    <div className="metric-card canvasser-turf-metric">
+                      <span>Total</span>
+                      <strong>{canvasserListProgress.total}</strong>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p className="geofence-panel-lead">No addresses found inside your assigned geofences.</p>
+              )}
+            </aside>
+          )}
           {role === 'admin' && (
             <aside className="geofence-panel">
               <div className="geofence-panel-header">
@@ -1618,7 +2018,7 @@ function App() {
             </aside>
           )}
         </section>
-      )}
+      ) : null}
       {role === 'admin' && activeAdminView === 'access' && (
         <section className="admin-panel">
           <h2>Admin Access Panel</h2>
