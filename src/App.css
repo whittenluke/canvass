@@ -1119,8 +1119,12 @@
   background: #ede9fe;
 }
 
-.geofence-delete-icon {
+.geofence-panel-menu-anchor {
+  position: relative;
   flex-shrink: 0;
+}
+
+.geofence-panel-menu-trigger {
   display: grid;
   place-items: center;
   width: 2rem;
@@ -1133,17 +1137,83 @@
   cursor: pointer;
 }
 
-.geofence-delete-icon:hover {
+.geofence-panel-menu-trigger:hover {
   background: #f0f4f8;
   color: #486581;
 }
 
-.geofence-delete-icon:focus-visible {
+.geofence-panel-menu-trigger:focus-visible {
   outline: 2px solid #486581;
   outline-offset: 2px;
 }
 
-.geofence-trash-svg {
+.geofence-panel-menu-dots {
+  display: block;
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.geofence-panel-actions-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  min-width: 11.5rem;
+  padding: 0.25rem 0;
+  border-radius: 10px;
+  border: 1px solid #d9e2ec;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(16, 42, 67, 0.12);
+}
+
+.geofence-panel-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.45rem 0.75rem;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #334e68;
+  text-align: left;
+  cursor: pointer;
+}
+
+.geofence-panel-menu-item:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.geofence-panel-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.geofence-panel-menu-item--danger {
+  color: #9b2c2c;
+}
+
+.geofence-panel-menu-item--danger:hover:not(:disabled) {
+  background: #fef2f2;
+  color: #7f1d1d;
+}
+
+.geofence-panel-menu-item .geofence-trash-svg {
+  flex-shrink: 0;
+}
+
+.geofence-panel-menu-item .geofence-mark-canvassed-svg {
+  flex-shrink: 0;
+  color: #15803d;
+}
+
+.geofence-trash-svg,
+.geofence-mark-canvassed-svg {
   display: block;
 }
 
@@ -1244,8 +1314,23 @@
   background: #822727;
 }
 
+.geofence-confirm-apply {
+  border: 0;
+  border-radius: 8px;
+  background: #334e68;
+  color: #fff;
+  padding: 0.45rem 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.geofence-confirm-apply:hover:not(:disabled) {
+  background: #243b53;
+}
+
 .geofence-confirm-cancel:disabled,
-.geofence-confirm-delete:disabled {
+.geofence-confirm-delete:disabled,
+.geofence-confirm-apply:disabled {
   opacity: 0.65;
   cursor: not-allowed;
 }
