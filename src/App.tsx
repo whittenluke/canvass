@@ -65,6 +65,11 @@ function addressInAssignedGeofences(
 }
 
 type SupabaseClientNonNull = NonNullable<typeof supabase>
+type AdminMarkGeofenceResultRow = {
+  updated_count: number
+  already_canvassed: number
+  total_count: number
+}
 
 async function fetchAddressStatsInsidePolygon(
   client: SupabaseClientNonNull,
@@ -109,47 +114,6 @@ async function fetchAddressStatsInsidePolygon(
     else from += pageSize
   }
   return { total, canvassed, remaining: Math.max(total - canvassed, 0) }
-}
-
-async function fetchNotCanvassedAddressIdsInsidePolygon(
-  client: SupabaseClientNonNull,
-  polygon: GeoJSON.Polygon,
-): Promise<string[]> {
-  const coords = polygon.coordinates[0] ?? []
-  if (coords.length === 0) return []
-  const lngs = coords.map(([lng]) => lng)
-  const lats = coords.map(([, lat]) => lat)
-  const minLng = Math.min(...lngs)
-  const maxLng = Math.max(...lngs)
-  const minLat = Math.min(...lats)
-  const maxLat = Math.max(...lats)
-
-  const ids: string[] = []
-  let from = 0
-  const pageSize = 1000
-  let done = false
-  while (!done) {
-    const { data, error } = await client
-      .from('addresses')
-      .select('id,lat,long,canvassed')
-      .gte('lat', minLat)
-      .lte('lat', maxLat)
-      .gte('long', minLng)
-      .lte('long', maxLng)
-      .range(from, from + pageSize - 1)
-    if (error) {
-      throw new Error(error.message)
-    }
-    const rows = (data as Array<{ id: string; lat: number; long: number; canvassed: boolean }>) ?? []
-    rows.forEach((row) => {
-      if (!row.canvassed && booleanPointInPolygon(point([row.long, row.lat]), polygon)) {
-        ids.push(row.id)
-      }
-    })
-    if (rows.length < pageSize) done = true
-    else from += pageSize
-  }
-  return ids
 }
 
 /** First line of address with leading house number stripped, for grouping and headers. */
@@ -893,6 +857,7 @@ function App() {
   const [isGeofenceDeleting, setIsGeofenceDeleting] = useState(false)
   const [markAllCompleteDialogOpen, setMarkAllCompleteDialogOpen] = useState(false)
   const [isMarkingAllComplete, setIsMarkingAllComplete] = useState(false)
+  const [markAllTargetCanvassed, setMarkAllTargetCanvassed] = useState(true)
   const [geofencePanelMenuOpen, setGeofencePanelMenuOpen] = useState(false)
   const geofencePanelMenuRef = useRef<HTMLDivElement>(null)
   const [dotsEnabled, setDotsEnabled] = useState(true)
@@ -1194,7 +1159,7 @@ function App() {
         row_limit: VIEWPORT_LIMIT,
       })
 
-      let rows: AddressRow[] = []
+      let rows: AddressRow[]
       if (rpcResult.error) {
         const { data, error } = await supabase
           .from('addresses')
@@ -1418,6 +1383,7 @@ function App() {
   useEffect(() => {
     setMarkAllCompleteDialogOpen(false)
     setGeofencePanelMenuOpen(false)
+    setGeofenceMessage('')
   }, [selectedGeofenceId])
 
   useEffect(() => {
@@ -1560,40 +1526,50 @@ function App() {
     setIsMarkingAllComplete(true)
     setGeofenceMessage('')
     try {
-      const ids = await fetchNotCanvassedAddressIdsInsidePolygon(
-        supabase,
-        selectedGeofence.geometry,
-      )
-      if (ids.length === 0) {
-        setGeofenceMessage('Every address in this area is already canvassed.')
+      const { data, error } = await supabase.rpc('admin_mark_geofence_addresses_canvassed', {
+        p_geofence_id: selectedGeofence.id,
+        p_canvassed: markAllTargetCanvassed,
+      })
+      if (error) {
+        setGeofenceMessage(error.message)
+        try {
+          const p = await fetchAddressStatsInsidePolygon(supabase, selectedGeofence.geometry)
+          setGeofenceProgress(p)
+        } catch {
+          /* ignore */
+        }
         setMarkAllCompleteDialogOpen(false)
         return
       }
-      const CHUNK = 400
-      for (let i = 0; i < ids.length; i += CHUNK) {
-        const chunk = ids.slice(i, i + CHUNK)
-        const { error } = await supabase.from('addresses').update({ canvassed: true }).in('id', chunk)
-        if (error) {
-          setGeofenceMessage(error.message)
-          try {
-            const p = await fetchAddressStatsInsidePolygon(supabase, selectedGeofence.geometry)
-            setGeofenceProgress(p)
-          } catch {
-            /* ignore */
-          }
-          setMarkAllCompleteDialogOpen(false)
-          return
-        }
+      const row = ((data as AdminMarkGeofenceResultRow[] | null) ?? [])[0]
+      const updatedCount = row?.updated_count ?? 0
+      if (updatedCount === 0) {
+        setGeofenceMessage(
+          markAllTargetCanvassed
+            ? 'Every address in this area is already canvassed.'
+            : 'Every address in this area is already uncanvassed.',
+        )
+        setMarkAllCompleteDialogOpen(false)
+        return
       }
-      const idSet = new Set(ids)
       setAddresses((current) =>
-        current.map((item) => (idSet.has(item.id) ? { ...item, canvassed: true } : item)),
+        current.map((item) =>
+          booleanPointInPolygon(point([item.long, item.lat]), selectedGeofence.geometry)
+            ? { ...item, canvassed: markAllTargetCanvassed }
+            : item,
+        ),
       )
       setGeofenceProgress((prev) =>
-        prev ? { ...prev, canvassed: prev.total, remaining: 0 } : prev,
+        prev
+          ? markAllTargetCanvassed
+            ? { ...prev, canvassed: prev.total, remaining: 0 }
+            : { ...prev, canvassed: 0, remaining: prev.total }
+          : prev,
       )
       setGeofenceMessage(
-        `Marked ${ids.length} address${ids.length === 1 ? '' : 'es'} as canvassed.`,
+        `Marked ${updatedCount} address${updatedCount === 1 ? '' : 'es'} as ${
+          markAllTargetCanvassed ? 'canvassed' : 'uncanvassed'
+        }.`,
       )
       setMarkAllCompleteDialogOpen(false)
     } catch (e) {
@@ -2513,11 +2489,30 @@ function App() {
                           }
                           onClick={() => {
                             setGeofencePanelMenuOpen(false)
+                            setMarkAllTargetCanvassed(true)
                             setMarkAllCompleteDialogOpen(true)
                           }}
                         >
                           <GeofenceMarkCanvassedIcon />
                           <span>Mark all addresses canvassed</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="geofence-panel-menu-item"
+                          role="menuitem"
+                          disabled={
+                            isGeofenceProgressLoading ||
+                            !geofenceProgress ||
+                            geofenceProgress.canvassed <= 0
+                          }
+                          onClick={() => {
+                            setGeofencePanelMenuOpen(false)
+                            setMarkAllTargetCanvassed(false)
+                            setMarkAllCompleteDialogOpen(true)
+                          }}
+                        >
+                          <GeofenceMarkCanvassedIcon />
+                          <span>Mark all addresses uncanvassed</span>
                         </button>
                         <button
                           type="button"
@@ -2659,12 +2654,14 @@ function App() {
                     aria-modal="true"
                     aria-labelledby="geofence-mark-all-dialog-title"
                   >
-                    <h4 id="geofence-mark-all-dialog-title">Mark all addresses canvassed?</h4>
+                    <h4 id="geofence-mark-all-dialog-title">
+                      Mark all addresses {markAllTargetCanvassed ? 'canvassed' : 'uncanvassed'}?
+                    </h4>
                     <p>
                       Every address inside{' '}
                       <span className="geofence-confirm-name">{geofenceDisplayNameForDelete}</span>{' '}
-                      will be set to canvassed. You can still change individual addresses on the map
-                      later.
+                      will be set to {markAllTargetCanvassed ? 'canvassed' : 'uncanvassed'}. You can
+                      still change individual addresses on the map later.
                     </p>
                     <div className="geofence-confirm-actions">
                       <button
@@ -2681,7 +2678,9 @@ function App() {
                         disabled={isMarkingAllComplete}
                         onClick={() => void confirmMarkAllAddressesInGeofence()}
                       >
-                        {isMarkingAllComplete ? 'Updating…' : 'Mark all canvassed'}
+                        {isMarkingAllComplete
+                          ? 'Updating…'
+                          : `Mark all ${markAllTargetCanvassed ? 'canvassed' : 'uncanvassed'}`}
                       </button>
                     </div>
                   </div>
