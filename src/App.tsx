@@ -924,6 +924,10 @@ function App() {
     () => new Set(assignedGeofenceIdList),
     [assignedGeofenceIdList],
   )
+  const geofencesForMap = useMemo(() => {
+    if (role !== 'canvasser') return geofences
+    return geofences.filter((g) => assignedGeofenceIdSet.has(g.id))
+  }, [role, geofences, assignedGeofenceIdSet])
   const geofenceCompletionPercent = useMemo(() => {
     if (!geofenceProgress || geofenceProgress.total === 0) return 0
     return Math.round((geofenceProgress.canvassed / geofenceProgress.total) * 100)
@@ -1211,7 +1215,7 @@ function App() {
         rows = (rpcResult.data as AddressRow[]) ?? []
       }
 
-      setHitViewportLimit(matchedCount > rows.length)
+      setHitViewportLimit(role === 'admin' && matchedCount > rows.length)
       setAddresses(rows)
     }
 
@@ -2176,7 +2180,7 @@ function App() {
               )}
               <MapViewportWatcher onViewportChange={setViewport} />
               <GeofenceDrawManager
-                geofences={geofences}
+                geofences={geofencesForMap}
                 enabled={role === 'admin'}
                 allowGeofenceSelect={role === 'admin'}
                 assignedGeofenceIdList={assignedGeofenceIdList}
@@ -2434,7 +2438,7 @@ function App() {
                   <div className="geofence-progress">
                     <div className="progress-summary">
                       <div className="progress-headline">
-                        <span>Canvassed</span>
+                        <span>Progress</span>
                         <strong>{canvasserListProgress.percent}%</strong>
                       </div>
                       <div
