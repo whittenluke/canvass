@@ -232,11 +232,53 @@ function mergeClustersByCrossGap(clusters: AddressRow[][], maxGapM: number): Add
   return list
 }
 
+const METERS_PER_DEGREE_LAT = 111_111
+
+/**
+ * O(n) viewport grid: bucket addresses by lat/lng cells sized in ~screen pixels at the current zoom.
+ * Used for admin overview so dots can appear earlier without O(n²) proximity clustering on thousands of points.
+ */
+function clusterAddressesByViewportGrid(
+  addresses: AddressRow[],
+  viewport: ViewportBounds,
+  cellPixels: number,
+): AddressRow[][] {
+  const centerLat = Math.min(85, Math.max(-85, (viewport.south + viewport.north) / 2))
+  const cosLat = Math.max(0.12, Math.cos((centerLat * Math.PI) / 180))
+  const metersPerPixel = (156543.03392804097 * cosLat) / Math.pow(2, viewport.zoom)
+  const cellMeters = cellPixels * metersPerPixel
+  const dLat = cellMeters / METERS_PER_DEGREE_LAT
+  const dLng = cellMeters / (METERS_PER_DEGREE_LAT * cosLat)
+
+  const buckets = new Map<string, AddressRow[]>()
+  for (const a of addresses) {
+    const gi = Math.floor(a.lat / dLat)
+    const gj = Math.floor(a.long / dLng)
+    const key = `${gi},${gj}`
+    let bucket = buckets.get(key)
+    if (!bucket) {
+      bucket = []
+      buckets.set(key, bucket)
+    }
+    bucket.push(a)
+  }
+  return [...buckets.values()]
+}
+
+function sortClustersSinglesFirst(clusters: AddressRow[][]): AddressRow[][] {
+  const singles = clusters.filter((c) => c.length === 1)
+  const multi = clusters.filter((c) => c.length > 1)
+  return [...singles, ...multi]
+}
+
 /** New icon per marker: Leaflet must not reuse one DivIcon instance across multiple markers. */
-function createClusterCountIcon(count: number): L.DivIcon {
+function createClusterCountIcon(count: number, allCanvassed: boolean): L.DivIcon {
+  const badgeClass = allCanvassed
+    ? 'address-cluster-hit__badge address-cluster-hit__badge--all-canvassed'
+    : 'address-cluster-hit__badge'
   return L.divIcon({
     className: 'address-cluster-leaflet-marker',
-    html: `<div class="address-cluster-hit" aria-hidden="true"><span class="address-cluster-hit__badge">${count}</span></div>`,
+    html: `<div class="address-cluster-hit" aria-hidden="true"><span class="${badgeClass}">${count}</span></div>`,
     iconSize: [44, 44],
     iconAnchor: [22, 22],
   })
@@ -245,7 +287,12 @@ function createClusterCountIcon(count: number): L.DivIcon {
 const RURAL_HALL_CENTER: [number, number] = [36.2413, -80.2937]
 const APP_ROLES = new Set(['admin', 'canvasser'])
 const VIEWPORT_LIMIT = 4000
-const DOTS_VISIBLE_MIN_ZOOM = 15
+/** Canvassers need dots a bit earlier while walking. */
+const DOTS_VISIBLE_MIN_ZOOM_CANVASSER = 15
+/** Admin: dots from this zoom; overview uses grid clustering (see ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM). */
+const DOTS_VISIBLE_MIN_ZOOM_ADMIN = 15
+/** Admin: at this zoom and above, use tight proximity clusters (buildings); below, use grid overview clusters. */
+const ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM = 17
 /** Canvasser: invisible CircleMarker radius (px), much larger than the visible dot for finger taps. */
 const CANVASSER_ADDRESS_HIT_RADIUS_PX = 26
 /** First pass: union pairs within this distance (m). */
@@ -314,6 +361,40 @@ function MapPaneSetup() {
   return null
 }
 
+function MapStatusLine({
+  dotsEnabled,
+  showAddressDots,
+  hitViewportLimit,
+  role,
+}: {
+  dotsEnabled: boolean
+  showAddressDots: boolean
+  hitViewportLimit: boolean
+  role: string
+}) {
+  let text: string
+  let muted = false
+  if (!dotsEnabled) {
+    text = 'Address dots are hidden. Use "Show dots" to re-enable.'
+  } else if (!showAddressDots) {
+    text =
+      role === 'admin'
+        ? 'Zoom in closer to show address dots'
+        : 'Zoom in to see address dots.'
+  } else if (hitViewportLimit) {
+    text = `Too many points in this view; showing first ${VIEWPORT_LIMIT}. Zoom in for full detail.`
+  } else {
+    text = 'Map ready.'
+    muted = true
+  }
+
+  return (
+    <div className="map-status-line map-status-line--inline" role="status" aria-live="polite">
+      <span className={muted ? 'map-status-text muted' : 'map-status-text'}>{text}</span>
+    </div>
+  )
+}
+
 function GeofenceDrawManager({
   geofences,
   enabled,
@@ -338,6 +419,8 @@ function GeofenceDrawManager({
   const map = useMap()
   const featureGroupRef = useRef<L.FeatureGroup | null>(null)
   const drawControlRef = useRef<L.Control.Draw | null>(null)
+  /** While drawing/editing/deleting geofences, ignore map background clicks so we do not clear selection. */
+  const blockGeofenceClearOnMapClickRef = useRef(false)
 
   useEffect(() => {
     if (!featureGroupRef.current) {
@@ -349,21 +432,21 @@ function GeofenceDrawManager({
     group.clearLayers()
     const assignedSet = new Set(assignedGeofenceIdList)
     geofences.forEach((fence) => {
-      const isSelected = fence.id === selectedGeofenceId
       const isMine = assignedSet.has(fence.id)
       let color: string
       let weight: number
       let fillColor: string
       let fillOpacity: number
       if (allowGeofenceSelect) {
-        color = isSelected ? '#2563eb' : '#334155'
-        weight = isSelected ? 3 : 2
-        fillColor = isSelected ? '#93c5fd' : '#94a3b8'
-        fillOpacity = isSelected ? 0.2 : 0.1
+        /* Darker violet for contrast on OSM; fill still translucent so roads show through. */
+        color = '#4c1d95'
+        weight = 3
+        fillColor = '#c4b5fd'
+        fillOpacity = 0.34
       } else if (assignedGeofenceIdList.length > 0) {
-        color = isMine ? '#5b21b6' : '#94a3b8'
+        color = isMine ? '#4c1d95' : '#94a3b8'
         weight = isMine ? 3 : 1.5
-        fillColor = isMine ? '#ddd6fe' : '#cbd5e1'
+        fillColor = isMine ? '#c4b5fd' : '#cbd5e1'
         fillOpacity = isMine ? 0.34 : 0.07
       } else {
         color = '#94a3b8'
@@ -383,35 +466,106 @@ function GeofenceDrawManager({
       ) as L.Polygon & { geofenceId?: string }
       layer.geofenceId = fence.id
       if (allowGeofenceSelect) {
-        layer.on('click', () => onSelect(fence.id))
+        layer.on('click', (e: L.LeafletMouseEvent) => {
+          L.DomEvent.stopPropagation(e)
+          onSelect(fence.id)
+        })
       }
       group.addLayer(layer)
     })
-  }, [map, geofences, selectedGeofenceId, onSelect, allowGeofenceSelect, assignedGeofenceIdList])
+  }, [map, geofences, onSelect, allowGeofenceSelect, assignedGeofenceIdList])
+
+  useEffect(() => {
+    const block = () => {
+      blockGeofenceClearOnMapClickRef.current = true
+    }
+    const unblock = () => {
+      blockGeofenceClearOnMapClickRef.current = false
+    }
+    map.on(L.Draw.Event.DRAWSTART, block)
+    map.on(L.Draw.Event.DRAWSTOP, unblock)
+    map.on(L.Draw.Event.CREATED, unblock)
+    map.on(L.Draw.Event.EDITSTART, block)
+    map.on(L.Draw.Event.EDITSTOP, unblock)
+    map.on(L.Draw.Event.EDITED, unblock)
+    map.on(L.Draw.Event.DELETESTART, block)
+    map.on(L.Draw.Event.DELETESTOP, unblock)
+    map.on(L.Draw.Event.DELETED, unblock)
+    map.on(L.Draw.Event.TOOLBARCLOSED, unblock)
+    return () => {
+      map.off(L.Draw.Event.DRAWSTART, block)
+      map.off(L.Draw.Event.DRAWSTOP, unblock)
+      map.off(L.Draw.Event.CREATED, unblock)
+      map.off(L.Draw.Event.EDITSTART, block)
+      map.off(L.Draw.Event.EDITSTOP, unblock)
+      map.off(L.Draw.Event.EDITED, unblock)
+      map.off(L.Draw.Event.DELETESTART, block)
+      map.off(L.Draw.Event.DELETESTOP, unblock)
+      map.off(L.Draw.Event.DELETED, unblock)
+      map.off(L.Draw.Event.TOOLBARCLOSED, unblock)
+    }
+  }, [map])
+
+  useEffect(() => {
+    if (!allowGeofenceSelect) {
+      return
+    }
+    const onMapClick = () => {
+      if (blockGeofenceClearOnMapClickRef.current) {
+        return
+      }
+      onSelect('')
+    }
+    map.on('click', onMapClick)
+    return () => {
+      map.off('click', onMapClick)
+    }
+  }, [map, allowGeofenceSelect, onSelect])
 
   useEffect(() => {
     if (!featureGroupRef.current) return
-    if (enabled && !drawControlRef.current) {
-      drawControlRef.current = new L.Control.Draw({
-        draw: {
-          polygon: {},
-          rectangle: false,
-          polyline: false,
-          marker: false,
-          circle: false,
-          circlemarker: false,
-        },
-        edit: {
-          featureGroup: featureGroupRef.current,
-        },
-      })
-      map.addControl(drawControlRef.current)
+
+    const removeDrawControl = () => {
+      if (drawControlRef.current) {
+        map.removeControl(drawControlRef.current)
+        drawControlRef.current = null
+      }
     }
-    if (!enabled && drawControlRef.current) {
-      map.removeControl(drawControlRef.current)
-      drawControlRef.current = null
+
+    if (!enabled) {
+      removeDrawControl()
+      return removeDrawControl
     }
-  }, [map, enabled])
+
+    // Rebuild so edit/delete only appear with a selection, and Strict Mode never stacks duplicates.
+    removeDrawControl()
+
+    const showEditToolbar = Boolean(selectedGeofenceId)
+    const group = featureGroupRef.current
+
+    drawControlRef.current = new L.Control.Draw({
+      draw: {
+        polygon: {},
+        rectangle: false,
+        polyline: false,
+        marker: false,
+        circle: false,
+        circlemarker: false,
+      },
+      ...(showEditToolbar
+        ? {
+            edit: {
+              featureGroup: group,
+              edit: {},
+              remove: true,
+            },
+          }
+        : {}),
+    })
+    map.addControl(drawControlRef.current)
+
+    return removeDrawControl
+  }, [map, enabled, selectedGeofenceId])
 
   useEffect(() => {
     const handleCreated = (event: L.DrawEvents.Created) => {
@@ -695,12 +849,23 @@ function App() {
     )
   }, [role, validAddresses, assignedGeofenceIdList, geofences, assignedGeofenceIdSet])
   const addressClustersForMap = useMemo(() => {
+    if (addressesForMapDots.length === 0) return []
+
+    const useProximityClustering =
+      role !== 'admin' ||
+      !viewport ||
+      viewport.zoom >= ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM
+
+    if (!useProximityClustering) {
+      const cellPixels = viewport.zoom <= 14 ? 72 : viewport.zoom <= 15 ? 56 : 48
+      const raw = clusterAddressesByViewportGrid(addressesForMapDots, viewport, cellPixels)
+      return sortClustersSinglesFirst(raw)
+    }
+
     const linked = clusterAddressesByProximity(addressesForMapDots, ADDRESS_CLUSTER_MERGE_METERS)
     const merged = mergeClustersByCrossGap(linked, ADDRESS_CLUSTER_CROSS_GAP_METERS)
-    const singles = merged.filter((c) => c.length === 1)
-    const multi = merged.filter((c) => c.length > 1)
-    return [...singles, ...multi]
-  }, [addressesForMapDots])
+    return sortClustersSinglesFirst(merged)
+  }, [addressesForMapDots, role, viewport])
   const canvasserListRowsLive = useMemo(() => {
     if (!canvasserListAddresses) return []
     const byId = new Map<string, AddressRow>()
@@ -1141,8 +1306,9 @@ function App() {
   }, [nearbyAddressSheet])
 
   const centerPoint = useMemo<[number, number]>(() => RURAL_HALL_CENTER, [])
-  const isCloseZoom = (viewport?.zoom ?? 13) >= 17
-  const showAddressDots = dotsEnabled && (viewport?.zoom ?? 13) >= DOTS_VISIBLE_MIN_ZOOM
+  const isCloseZoom = (viewport?.zoom ?? 13) >= ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM
+  const dotsVisibleMinZoom = role === 'admin' ? DOTS_VISIBLE_MIN_ZOOM_ADMIN : DOTS_VISIBLE_MIN_ZOOM_CANVASSER
+  const showAddressDots = dotsEnabled && (viewport?.zoom ?? 13) >= dotsVisibleMinZoom
 
   const toggleCanvassed = async (address: AddressRow) => {
     if (!supabase) {
@@ -1545,44 +1711,65 @@ function App() {
       </header>
 
       {role === 'admin' && (
-        <nav className="view-nav" aria-label="Admin pages">
-          <button
-            type="button"
-            className={activeAdminView === 'map' ? 'view-tab active' : 'view-tab'}
-            onClick={() => setActiveAdminView('map')}
-          >
+        <div className="map-toolbar-row">
+          <nav className="map-toolbar-nav" aria-label="Admin pages">
+            <button
+              type="button"
+              className={activeAdminView === 'map' ? 'view-tab active' : 'view-tab'}
+              onClick={() => setActiveAdminView('map')}
+            >
+              Map
+            </button>
+            <button
+              type="button"
+              className={activeAdminView === 'access' ? 'view-tab active' : 'view-tab'}
+              onClick={() => {
+                setGeofenceDeleteConfirmId(null)
+                setActiveAdminView('access')
+              }}
+            >
+              Admin Access
+            </button>
+          </nav>
+          {activeAdminView === 'map' && (
+            <MapStatusLine
+              dotsEnabled={dotsEnabled}
+              showAddressDots={showAddressDots}
+              hitViewportLimit={hitViewportLimit}
+              role={role}
+            />
+          )}
+        </div>
+      )}
+
+      {role === 'canvasser' && canvasserUiView === 'list' && (
+        <nav className="canvasser-view-nav" aria-label="Canvasser views">
+          <button type="button" className="view-tab" onClick={() => setCanvasserUiView('map')}>
             Map
           </button>
-          <button
-            type="button"
-            className={activeAdminView === 'access' ? 'view-tab active' : 'view-tab'}
-            onClick={() => {
-              setGeofenceDeleteConfirmId(null)
-              setActiveAdminView('access')
-            }}
-          >
-            Admin Access
+          <button type="button" className="view-tab active" onClick={() => setCanvasserUiView('list')}>
+            Address list
           </button>
         </nav>
       )}
 
-      {role === 'canvasser' && (
-        <nav className="canvasser-view-nav" aria-label="Canvasser views">
-          <button
-            type="button"
-            className={canvasserUiView === 'map' ? 'view-tab active' : 'view-tab'}
-            onClick={() => setCanvasserUiView('map')}
-          >
-            Map
-          </button>
-          <button
-            type="button"
-            className={canvasserUiView === 'list' ? 'view-tab active' : 'view-tab'}
-            onClick={() => setCanvasserUiView('list')}
-          >
-            Address list
-          </button>
-        </nav>
+      {role === 'canvasser' && canvasserUiView === 'map' && (
+        <div className="map-toolbar-row">
+          <nav className="map-toolbar-nav" aria-label="Canvasser views">
+            <button type="button" className="view-tab active" onClick={() => setCanvasserUiView('map')}>
+              Map
+            </button>
+            <button type="button" className="view-tab" onClick={() => setCanvasserUiView('list')}>
+              Address list
+            </button>
+          </nav>
+          <MapStatusLine
+            dotsEnabled={dotsEnabled}
+            showAddressDots={showAddressDots}
+            hitViewportLimit={hitViewportLimit}
+            role={role}
+          />
+        </div>
       )}
 
       {errorMessage && <p className="error-banner">{errorMessage}</p>}
@@ -1684,19 +1871,6 @@ function App() {
         </section>
       ) : (role !== 'admin' || activeAdminView === 'map') ? (
         <section className="map-page">
-          <div className="map-status-line">
-            {!dotsEnabled ? (
-              <p className="map-status-text">Address dots are hidden. Use "Show dots" to re-enable.</p>
-            ) : !showAddressDots ? (
-              <p className="map-status-text">Zoom to see address dots.</p>
-            ) : hitViewportLimit ? (
-              <p className="map-status-text">
-                Too many points in this view; showing first {VIEWPORT_LIMIT}. Zoom in for full detail.
-              </p>
-            ) : (
-              <p className="map-status-text muted">Map ready.</p>
-            )}
-          </div>
           <section className="map-panel">
             <MapContainer center={centerPoint} zoom={13} scrollWheelZoom className="map-view">
               <MapPaneSetup />
@@ -1776,15 +1950,6 @@ function App() {
                   ) : null}
                 </div>
               )}
-              <button
-                type="button"
-                className="map-icon-control"
-                title={dotsEnabled ? 'Hide address dots' : 'Show address dots'}
-                aria-label={dotsEnabled ? 'Hide address dots' : 'Show address dots'}
-                onClick={() => setDotsEnabled((current) => !current)}
-              >
-                {dotsEnabled ? '◉' : '○'}
-              </button>
               <MapViewportWatcher onViewportChange={setViewport} />
               <GeofenceDrawManager
                 geofences={geofences}
@@ -1916,13 +2081,14 @@ function App() {
                     members.reduce((sum, m) => sum + m.lat, 0) / members.length
                   const centroidLng =
                     members.reduce((sum, m) => sum + m.long, 0) / members.length
-                  const anyCanvassed = members.some((m) => m.canvassed)
+                  const allCanvassed =
+                    members.length > 0 && members.every((m) => m.canvassed)
                   const sortedMembers = [...members].sort((a, b) =>
                     a.full_address.localeCompare(b.full_address),
                   )
                   return (
                     <Fragment key={clusterKey}>
-                      {anyCanvassed && (
+                      {allCanvassed && (
                         <CircleMarker
                           key={`${clusterKey}-halo`}
                           center={[centroidLat, centroidLng]}
@@ -1940,7 +2106,7 @@ function App() {
                       <Marker
                         position={[centroidLat, centroidLng]}
                         pane="addressPane"
-                        icon={createClusterCountIcon(members.length)}
+                        icon={createClusterCountIcon(members.length, allCanvassed)}
                         eventHandlers={{
                           click: () => {
                             setNearbyAddressSheet({
@@ -1953,6 +2119,18 @@ function App() {
                   )
                 })}
             </MapContainer>
+            <button
+              type="button"
+              className="map-icon-control"
+              title={dotsEnabled ? 'Hide address dots' : 'Show address dots'}
+              aria-label={dotsEnabled ? 'Hide address dots' : 'Show address dots'}
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => setDotsEnabled((current) => !current)}
+            >
+              {dotsEnabled ? '◉' : '○'}
+            </button>
             {nearbyAddressSheet && (
               <NearbyAddressSheet
                 memberIds={nearbyAddressSheet.memberIds}
