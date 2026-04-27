@@ -346,19 +346,6 @@ function sortClustersSinglesFirst(clusters: AddressRow[][]): AddressRow[][] {
   return [...singles, ...multi]
 }
 
-/** New icon per marker: Leaflet must not reuse one DivIcon instance across multiple markers. */
-function createClusterCountIcon(count: number, allCanvassed: boolean): L.DivIcon {
-  const badgeClass = allCanvassed
-    ? 'address-cluster-hit__badge address-cluster-hit__badge--all-canvassed'
-    : 'address-cluster-hit__badge'
-  return L.divIcon({
-    className: 'address-cluster-leaflet-marker',
-    html: `<div class="address-cluster-hit" aria-hidden="true"><span class="${badgeClass}">${count}</span></div>`,
-    iconSize: [44, 44],
-    iconAnchor: [22, 22],
-  })
-}
-
 const RURAL_HALL_CENTER: [number, number] = [36.2413, -80.2937]
 const APP_ROLES = new Set(['admin', 'canvasser'])
 /** Max addresses loaded for the map viewport (clustering cost grows quickly above ~4–6k at admin detail zoom). */
@@ -369,8 +356,48 @@ const DOTS_VISIBLE_MIN_ZOOM_CANVASSER = 15
 const DOTS_VISIBLE_MIN_ZOOM_ADMIN = 15
 /** Admin: at this zoom and above, use tight proximity clusters (buildings); below, use grid overview clusters. */
 const ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM = 17
-/** Canvasser: invisible CircleMarker radius (px), much larger than the visible dot for finger taps. */
-const CANVASSER_ADDRESS_HIT_RADIUS_PX = 26
+/** Canvasser: max invisible hit radius (px) when zoomed in — easier finger taps. */
+const CANVASSER_ADDRESS_HIT_RADIUS_LOOSE_PX = 26
+
+/** New icon per marker: Leaflet must not reuse one DivIcon instance across multiple markers. */
+function createClusterCountIcon(
+  count: number,
+  allCanvassed: boolean,
+  compactHit: boolean,
+): L.DivIcon {
+  const badgeClass = allCanvassed
+    ? 'address-cluster-hit__badge address-cluster-hit__badge--all-canvassed'
+    : 'address-cluster-hit__badge'
+  const hitClass = compactHit
+    ? 'address-cluster-hit address-cluster-hit--compact'
+    : 'address-cluster-hit'
+  const size = compactHit ? 30 : 44
+  const half = size / 2
+  return L.divIcon({
+    className: 'address-cluster-leaflet-marker',
+    html: `<div class="${hitClass}" aria-hidden="true"><span class="${badgeClass}">${count}</span></div>`,
+    iconSize: [size, size],
+    iconAnchor: [half, half],
+  })
+}
+
+/** Tighter dot/cluster hit targets below this zoom so geofence polygons (below addressPane) get more clicks. */
+function addressHitIsGenerous(zoom: number): boolean {
+  return zoom >= ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM
+}
+
+function canvasserAddressHitRadiusPx(zoom: number): number {
+  if (addressHitIsGenerous(zoom)) return CANVASSER_ADDRESS_HIT_RADIUS_LOOSE_PX
+  if (zoom >= 16) return 15
+  return 10
+}
+
+/** Admin: interactive hit circle radius in px (visual circle stays separate). */
+function adminAddressHitRadiusPx(zoom: number, visualRadius: number): number {
+  if (addressHitIsGenerous(zoom)) return visualRadius + 6
+  return Math.max(4, visualRadius)
+}
+
 /** First pass: union pairs within this distance (m). */
 const ADDRESS_CLUSTER_MERGE_METERS = 12
 /** Second pass: merge whole clusters if any cross-cluster pair is within this (m). Catches wide footprints. */
@@ -1011,9 +1038,19 @@ function App() {
       ),
     [addresses],
   )
-  /** Canvassers: only dots inside assigned geofences. No assignment → no dots. Admins: all in view. */
+  /** Canvassers: only dots inside assigned geofences. Admins: all in view, or only inside selected geofence when dots are on. */
   const addressesForMapDots = useMemo(() => {
     if (role !== 'canvasser') {
+      if (
+        role === 'admin' &&
+        dotsEnabled &&
+        selectedGeofence?.geometry &&
+        selectedGeofenceId
+      ) {
+        return validAddresses.filter((address) =>
+          booleanPointInPolygon(point([address.long, address.lat]), selectedGeofence.geometry),
+        )
+      }
       return validAddresses
     }
     if (assignedGeofenceIdList.length === 0) {
@@ -1022,7 +1059,16 @@ function App() {
     return validAddresses.filter((address) =>
       addressInAssignedGeofences(address, geofences, assignedGeofenceIdSet),
     )
-  }, [role, validAddresses, assignedGeofenceIdList, geofences, assignedGeofenceIdSet])
+  }, [
+    role,
+    dotsEnabled,
+    validAddresses,
+    selectedGeofence,
+    selectedGeofenceId,
+    assignedGeofenceIdList,
+    geofences,
+    assignedGeofenceIdSet,
+  ])
   const addressClustersForMap = useMemo(() => {
     if (addressesForMapDots.length === 0) return []
 
@@ -2740,7 +2786,7 @@ function App() {
                               key={`${address.id}-hit`}
                               center={[address.lat, address.long]}
                               pane="addressPane"
-                              radius={CANVASSER_ADDRESS_HIT_RADIUS_PX}
+                              radius={canvasserAddressHitRadiusPx(viewport?.zoom ?? 13)}
                               pathOptions={{
                                 className: 'address-marker-hit',
                                 color: '#000000',
@@ -2755,16 +2801,36 @@ function App() {
                             </CircleMarker>
                           </>
                         ) : (
-                          <CircleMarker
-                            key={`${address.id}-marker`}
-                            center={[address.lat, address.long]}
-                            pane="addressPane"
-                            radius={visualRadius}
-                            pathOptions={visualPathOptions}
-                            eventHandlers={popupOpenHandlers}
-                          >
-                            <Popup>{popupContent}</Popup>
-                          </CircleMarker>
+                          <>
+                            <CircleMarker
+                              key={`${address.id}-visual`}
+                              center={[address.lat, address.long]}
+                              pane="addressPane"
+                              radius={visualRadius}
+                              interactive={false}
+                              pathOptions={visualPathOptions}
+                            />
+                            <CircleMarker
+                              key={`${address.id}-hit`}
+                              center={[address.lat, address.long]}
+                              pane="addressPane"
+                              radius={adminAddressHitRadiusPx(
+                                viewport?.zoom ?? 13,
+                                visualRadius,
+                              )}
+                              pathOptions={{
+                                className: 'address-marker-hit address-marker-hit--admin',
+                                color: '#000000',
+                                opacity: 0,
+                                fillColor: '#000000',
+                                fillOpacity: 0.001,
+                                weight: 0,
+                              }}
+                              eventHandlers={popupOpenHandlers}
+                            >
+                              <Popup>{popupContent}</Popup>
+                            </CircleMarker>
+                          </>
                         )}
                       </Fragment>
                     )
@@ -2798,7 +2864,11 @@ function App() {
                       <Marker
                         position={[centroidLat, centroidLng]}
                         pane="addressPane"
-                        icon={createClusterCountIcon(members.length, allCanvassed)}
+                        icon={createClusterCountIcon(
+                          members.length,
+                          allCanvassed,
+                          !addressHitIsGenerous(viewport?.zoom ?? 13),
+                        )}
                         eventHandlers={{
                           click: () => {
                             setNearbyAddressSheet({

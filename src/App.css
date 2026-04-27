@@ -671,9 +671,23 @@
   font-weight: 600;
 }
 
-/* Canvasser: invisible Leaflet circle: large pixel radius for touch; keep barely non-zero fill for hit testing. */
+/* Invisible hit circles: generous when zoomed in, tight when zoomed out so geofence clicks land on polygons. */
 .leaflet-interactive.address-marker-hit {
   cursor: pointer;
+}
+
+.address-cluster-hit--compact {
+  width: 30px;
+  height: 30px;
+}
+
+.address-cluster-hit--compact .address-cluster-hit__badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 20px;
+  border-width: 1.5px;
 }
 
 .address-dot-visual--open {
