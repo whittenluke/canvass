@@ -438,16 +438,20 @@ function getAuthRedirectUrl(pathAndQuery: string): string {
   return `${window.location.origin}${pathAndQuery}`
 }
 
-/** After gated email check: signUp first; if Auth says user exists, sign in instead. */
+/** True when signUp failed because this email is already in auth (then we try sign-in). */
 function isEmailAlreadyRegisteredSignupError(message: string): boolean {
   const m = message.toLowerCase()
   return (
     m.includes('already been registered') ||
     m.includes('already registered') ||
     m.includes('user already exists') ||
-    m.includes('email address is already') ||
-    m.includes('duplicate')
+    m.includes('email address is already')
   )
+}
+
+function isInvalidPasswordSignInError(message: string): boolean {
+  const m = message.toLowerCase()
+  return m.includes('invalid login credentials') || m.includes('invalid email or password')
 }
 
 function MapViewportWatcher({
@@ -2032,11 +2036,51 @@ function App() {
     setIsAuthSubmitting(true)
     setAuthMessage('')
 
-    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+    const signUpOpts = {
       email: normalizedEmail,
       password,
       options: { emailRedirectTo: getAuthRedirectUrl('/') },
-    })
+    }
+
+    if (authPasswordIntent === 'sign_in') {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      })
+      if (!signInError) {
+        setIsAuthSubmitting(false)
+        return
+      }
+      if (signInError.message.toLowerCase().includes('email not confirmed')) {
+        setIsAuthSubmitting(false)
+        setAuthMessage(
+          'Confirm the link in your email first, then sign in here with the same password.',
+        )
+        return
+      }
+      if (isInvalidPasswordSignInError(signInError.message)) {
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp(signUpOpts)
+        if (!signUpError) {
+          setIsAuthSubmitting(false)
+          if (signUpData.session) {
+            return
+          }
+          setAuthMessage(
+            'Account created. Check your email to confirm, then sign in here with the same password.',
+          )
+          return
+        }
+      }
+      setIsAuthSubmitting(false)
+      setAuthMessage(
+        isInvalidPasswordSignInError(signInError.message)
+          ? 'Invalid email or password.'
+          : (signInError.message ?? 'Could not sign in.'),
+      )
+      return
+    }
+
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp(signUpOpts)
 
     if (!signUpError) {
       setIsAuthSubmitting(false)
@@ -2056,7 +2100,9 @@ function App() {
       })
       setIsAuthSubmitting(false)
       if (signInError) {
-        setAuthMessage('Invalid email or password.')
+        setAuthMessage(
+          'This email already has an account. Use Forgot password to reset it, or enter the password you used before.',
+        )
         return
       }
       return
@@ -2525,14 +2571,16 @@ function App() {
                   placeholder="At least 8 characters"
                 />
               </div>
-              <button
-                type="button"
-                className="auth-inline-link"
-                disabled={isAuthSubmitting}
-                onClick={() => void sendPasswordResetEmail()}
-              >
-                Forgot password?
-              </button>
+              {authPasswordIntent === 'sign_in' ? (
+                <button
+                  type="button"
+                  className="auth-inline-link"
+                  disabled={isAuthSubmitting}
+                  onClick={() => void sendPasswordResetEmail()}
+                >
+                  Forgot password?
+                </button>
+              ) : null}
               <div className="auth-actions">
                 <button type="submit" className="auth-primary-button" disabled={isAuthSubmitting}>
                   {isAuthSubmitting
