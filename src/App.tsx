@@ -29,6 +29,8 @@ type AccessRow = {
   email: string
   role: 'admin' | 'canvasser'
   status: 'pending' | 'active'
+  first_name: string | null
+  last_name: string | null
 }
 
 type ViewportBounds = {
@@ -62,6 +64,22 @@ function addressInAssignedGeofences(
       assignedGeofenceIdSet.has(g.id) &&
       booleanPointInPolygon(point([address.long, address.lat]), g.geometry),
   )
+}
+
+function splitFullName(fullName: string): { firstName: string | null; lastName: string | null } {
+  const trimmed = fullName.trim()
+  if (!trimmed) return { firstName: null, lastName: null }
+  const parts = trimmed.split(/\s+/)
+  const firstName = parts[0] ?? null
+  const lastName = parts.length > 1 ? parts.slice(1).join(' ') : null
+  return { firstName, lastName }
+}
+
+function accessDisplayName(entry: AccessRow): string {
+  const first = entry.first_name?.trim() ?? ''
+  const last = entry.last_name?.trim() ?? ''
+  const full = `${first} ${last}`.trim()
+  return full || entry.email
 }
 
 type SupabaseClientNonNull = NonNullable<typeof supabase>
@@ -845,11 +863,17 @@ function App() {
   const [hitViewportLimit, setHitViewportLimit] = useState(false)
   const [accessRows, setAccessRows] = useState<AccessRow[]>([])
   const [isProfilesLoading, setIsProfilesLoading] = useState(false)
+  const [isAddingUser, setIsAddingUser] = useState(false)
+  const [addUserModalOpen, setAddUserModalOpen] = useState(false)
+  const [openAccessActionsEmail, setOpenAccessActionsEmail] = useState('')
   const [accessMessage, setAccessMessage] = useState('')
+  const [newProfileName, setNewProfileName] = useState('')
   const [newProfileEmail, setNewProfileEmail] = useState('')
   const [newProfileRole, setNewProfileRole] = useState<'admin' | 'canvasser'>('canvasser')
-  const [editingEmail, setEditingEmail] = useState('')
-  const [editingEmailDraft, setEditingEmailDraft] = useState('')
+  const [editingUserEmail, setEditingUserEmail] = useState('')
+  const [editingUserNameDraft, setEditingUserNameDraft] = useState('')
+  const [editingUserEmailDraft, setEditingUserEmailDraft] = useState('')
+  const [editingUserRoleDraft, setEditingUserRoleDraft] = useState<'admin' | 'canvasser'>('canvasser')
   const [activeAdminView, setActiveAdminView] = useState<'map' | 'access'>('map')
   const [geofences, setGeofences] = useState<GeofenceRow[]>([])
   const [selectedGeofenceId, setSelectedGeofenceId] = useState('')
@@ -865,6 +889,8 @@ function App() {
   const [markAllTargetCanvassed, setMarkAllTargetCanvassed] = useState(true)
   const [geofencePanelMenuOpen, setGeofencePanelMenuOpen] = useState(false)
   const geofencePanelMenuRef = useRef<HTMLDivElement>(null)
+  const [assigneePickerOpen, setAssigneePickerOpen] = useState(false)
+  const geofenceAssigneePickerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const [dotsEnabled, setDotsEnabled] = useState(true)
   const [addressPopupOpenId, setAddressPopupOpenId] = useState<string | null>(null)
@@ -877,8 +903,13 @@ function App() {
     if (typeof window === 'undefined') return false
     return window.matchMedia('(min-width: 901px)').matches
   })
+  const [adminGeofencePanelExpanded, setAdminGeofencePanelExpanded] = useState(() => {
+    if (typeof window === 'undefined') return true
+    return window.matchMedia('(min-width: 901px)').matches
+  })
   const [canvasserMapHelpOpen, setCanvasserMapHelpOpen] = useState(false)
   const canvasserMapHelpRef = useRef<HTMLDivElement>(null)
+  const accessActionsMenuRef = useRef<HTMLDivElement>(null)
   const selectedGeofence = useMemo(
     () => geofences.find((fence) => fence.id === selectedGeofenceId) ?? null,
     [geofences, selectedGeofenceId],
@@ -899,15 +930,18 @@ function App() {
     if (role !== 'canvasser') return geofences
     return geofences.filter((g) => assignedGeofenceIdSet.has(g.id))
   }, [role, geofences, assignedGeofenceIdSet])
-  const geofenceCompletionPercent = useMemo(() => {
-    if (!geofenceProgress || geofenceProgress.total === 0) return 0
-    return Math.round((geofenceProgress.canvassed / geofenceProgress.total) * 100)
-  }, [geofenceProgress])
   const geofenceDisplayNameForDelete = useMemo(() => {
     if (!selectedGeofence) return ''
     const trimmed = geofenceNameDraft.trim()
     return trimmed || selectedGeofence.name || 'Unnamed geofence'
   }, [geofenceNameDraft, selectedGeofence])
+  const geofenceDetailsTitle = useMemo(() => {
+    if (!selectedGeofence) return 'Geofence details'
+    const draft = geofenceNameDraft.trim()
+    const persisted = selectedGeofence.name?.trim() ?? ''
+    const title = draft || persisted
+    return title ? `${title} details` : 'Geofence details'
+  }, [selectedGeofence, geofenceNameDraft])
   const showGeofenceDeleteDialog = Boolean(
     geofenceDeleteConfirmId &&
       geofenceDeleteConfirmId === selectedGeofenceId &&
@@ -980,8 +1014,39 @@ function App() {
     () => accessRows.filter((entry) => entry.role === 'admin').length,
     [accessRows],
   )
+  const geofenceAssigneeOptions = useMemo(() => {
+    const options = accessRows.map((entry) => {
+      const normalized = entry.email.trim().toLowerCase()
+      return {
+        value: normalized,
+        label: accessDisplayName(entry),
+      }
+    })
+    if (
+      geofenceEmailDraft &&
+      !options.some((option) => option.value === geofenceEmailDraft.trim().toLowerCase())
+    ) {
+      options.push({
+        value: geofenceEmailDraft.trim().toLowerCase(),
+        label: `${geofenceEmailDraft.trim()} (not in Admin Access list)`,
+      })
+    }
+    return options.sort((a, b) => a.label.localeCompare(b.label))
+  }, [accessRows, geofenceEmailDraft])
+  const selectedAssigneeOption = useMemo(
+    () =>
+      geofenceAssigneeOptions.find(
+        (option) => option.value === geofenceEmailDraft.trim().toLowerCase(),
+      ) ?? null,
+    [geofenceAssigneeOptions, geofenceEmailDraft],
+  )
   const buildAccessRows = (
-    accessData: { email: string; role: 'admin' | 'canvasser' }[] | null,
+    accessData: {
+      email: string
+      role: 'admin' | 'canvasser'
+      first_name: string | null
+      last_name: string | null
+    }[] | null,
     profileData: { email: string; role?: 'admin' | 'canvasser' }[] | null,
   ): AccessRow[] => {
     const byEmail = new Map<string, AccessRow>()
@@ -992,21 +1057,12 @@ function App() {
       byEmail.set(row.email.toLowerCase(), {
         email: row.email,
         role: row.role,
+        first_name: row.first_name ?? null,
+        last_name: row.last_name ?? null,
         status: (activeEmails.has(row.email.toLowerCase()) ? 'active' : 'pending') as
           | 'active'
           | 'pending',
       })
-    })
-
-    profiles.forEach((row) => {
-      const key = row.email.toLowerCase()
-      if (!byEmail.has(key) && row.role && APP_ROLES.has(row.role)) {
-        byEmail.set(key, {
-          email: row.email,
-          role: row.role,
-          status: 'active',
-        })
-      }
     })
 
     return Array.from(byEmail.values()).sort((a, b) => a.email.localeCompare(b.email))
@@ -1019,7 +1075,7 @@ function App() {
     setIsProfilesLoading(true)
     const { data: accessData, error: accessError } = await supabase
       .from('user_access')
-      .select('email,role')
+      .select('email,role,first_name,last_name')
       .in('role', ['admin', 'canvasser'])
       .order('email', { ascending: true })
 
@@ -1032,7 +1088,12 @@ function App() {
       setAccessMessage(accessError?.message ?? profileError?.message ?? 'Failed to load access.')
     } else {
       const rows = buildAccessRows(
-        (accessData as { email: string; role: 'admin' | 'canvasser' }[] | null) ?? [],
+        (accessData as {
+          email: string
+          role: 'admin' | 'canvasser'
+          first_name: string | null
+          last_name: string | null
+        }[] | null) ?? [],
         (profileData as { email: string; role?: 'admin' | 'canvasser' }[] | null) ?? [],
       )
       setAccessRows(rows)
@@ -1221,6 +1282,9 @@ function App() {
     const onChange = () => {
       if (mq.matches) {
         setCanvasserMobileAreasPanelExpanded(false)
+        setAdminGeofencePanelExpanded(false)
+      } else {
+        setAdminGeofencePanelExpanded(true)
       }
     }
     mq.addEventListener('change', onChange)
@@ -1403,8 +1467,30 @@ function App() {
   useEffect(() => {
     setMarkAllCompleteDialogOpen(false)
     setGeofencePanelMenuOpen(false)
+    setAssigneePickerOpen(false)
     setGeofenceMessage('')
   }, [selectedGeofenceId])
+
+  useEffect(() => {
+    if (!assigneePickerOpen) return
+    const onDocMouseDown = (event: MouseEvent) => {
+      const el = geofenceAssigneePickerRef.current
+      if (el && !el.contains(event.target as Node)) {
+        setAssigneePickerOpen(false)
+      }
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setAssigneePickerOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [assigneePickerOpen])
 
   useEffect(() => {
     if (!geofencePanelMenuOpen) return
@@ -1462,6 +1548,54 @@ function App() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [nearbyAddressSheet])
+
+  useEffect(() => {
+    if (!addUserModalOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !isAddingUser) {
+        event.preventDefault()
+        setAddUserModalOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [addUserModalOpen, isAddingUser])
+
+  useEffect(() => {
+    if (!openAccessActionsEmail) return
+    const onDocMouseDown = (event: MouseEvent) => {
+      const el = accessActionsMenuRef.current
+      if (el && !el.contains(event.target as Node)) {
+        setOpenAccessActionsEmail('')
+      }
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpenAccessActionsEmail('')
+      }
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [openAccessActionsEmail])
+
+  useEffect(() => {
+    if (!mapRef.current) return
+    // Leaflet can leave gray tile artifacts after overlay/panel layout changes on mobile.
+    const raf = window.requestAnimationFrame(() => {
+      mapRef.current?.invalidateSize(false)
+    })
+    const timer = window.setTimeout(() => {
+      mapRef.current?.invalidateSize(false)
+    }, 140)
+    return () => {
+      window.cancelAnimationFrame(raf)
+      window.clearTimeout(timer)
+    }
+  }, [adminGeofencePanelExpanded, geofencePanelMenuOpen])
 
   const centerPoint = useMemo<[number, number]>(() => RURAL_HALL_CENTER, [])
   const isCloseZoom = (viewport?.zoom ?? 13) >= ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM
@@ -1695,15 +1829,24 @@ function App() {
     }
 
     const email = newProfileEmail.trim().toLowerCase()
+    const { firstName, lastName } = splitFullName(newProfileName)
+    if (!firstName) {
+      setAccessMessage('Name is required.')
+      return
+    }
     if (!email) {
       setAccessMessage('Email is required.')
       return
     }
 
+    setIsAddingUser(true)
     const { error } = await supabase.rpc('admin_set_user_access', {
       target_email: email,
       target_role: newProfileRole,
+      target_first_name: firstName,
+      target_last_name: lastName,
     })
+    setIsAddingUser(false)
 
     if (error) {
       setAccessMessage(error.message)
@@ -1711,63 +1854,70 @@ function App() {
     }
 
     setAccessMessage('Access saved. User can now request a magic link with this email.')
+    setNewProfileName('')
     setNewProfileEmail('')
+    setNewProfileRole('canvasser')
+    setAddUserModalOpen(false)
 
     await refreshAccessList()
   }
 
-  const updateProfileRole = async (targetEmail: string, nextRole: 'admin' | 'canvasser') => {
-    if (!supabase || role !== 'admin') {
-      return
-    }
-
-    const { error } = await supabase.rpc('admin_set_user_access', {
-      target_email: targetEmail,
-      target_role: nextRole,
-    })
-
-    if (error) {
-      setAccessMessage(error.message)
-      return
-    }
-
-    await refreshAccessList()
-  }
-
-  const startEditEmail = (currentEmail: string) => {
-    setEditingEmail(currentEmail)
-    setEditingEmailDraft(currentEmail)
+  const startEditUser = (entry: AccessRow) => {
+    setEditingUserEmail(entry.email)
+    setEditingUserNameDraft(accessDisplayName(entry))
+    setEditingUserEmailDraft(entry.email)
+    setEditingUserRoleDraft(entry.role)
+    setOpenAccessActionsEmail('')
     setAccessMessage('')
   }
 
-  const cancelEditEmail = () => {
-    setEditingEmail('')
-    setEditingEmailDraft('')
+  const cancelEditUser = () => {
+    setEditingUserEmail('')
+    setEditingUserNameDraft('')
+    setEditingUserEmailDraft('')
+    setEditingUserRoleDraft('canvasser')
   }
 
-  const saveEditedEmail = async (currentEmail: string) => {
+  const saveEditedUser = async (currentEmail: string) => {
     if (!supabase || role !== 'admin') {
       return
     }
 
-    const nextEmail = editingEmailDraft.trim().toLowerCase()
+    const nextEmail = editingUserEmailDraft.trim().toLowerCase()
+    const { firstName, lastName } = splitFullName(editingUserNameDraft)
+    if (!firstName) {
+      setAccessMessage('Name is required.')
+      return
+    }
     if (!nextEmail) {
       setAccessMessage('Email is required.')
       return
     }
 
-    const { error } = await supabase.rpc('admin_update_user_email', {
-      old_email: currentEmail.toLowerCase(),
-      new_email: nextEmail,
-    })
+    if (nextEmail !== currentEmail.toLowerCase()) {
+      const { error } = await supabase.rpc('admin_update_user_email', {
+        old_email: currentEmail.toLowerCase(),
+        new_email: nextEmail,
+      })
+      if (error) {
+        setAccessMessage(error.message)
+        return
+      }
+    }
 
+    const { error } = await supabase.rpc('admin_set_user_access', {
+      target_email: nextEmail,
+      target_role: editingUserRoleDraft,
+      target_first_name: firstName,
+      target_last_name: lastName,
+    })
     if (error) {
       setAccessMessage(error.message)
       return
     }
 
-    setAccessMessage('User email updated.')
-    cancelEditEmail()
+    setAccessMessage('User updated.')
+    cancelEditUser()
     await refreshAccessList()
   }
 
@@ -1791,6 +1941,12 @@ function App() {
     }
 
     setAccessMessage('User access removed.')
+    setAccessRows((current) =>
+      current.filter((entry) => entry.email.toLowerCase() !== targetEmail.toLowerCase()),
+    )
+    if (editingUserEmail.toLowerCase() === targetEmail.toLowerCase()) {
+      cancelEditUser()
+    }
     await refreshAccessList()
   }
 
@@ -1889,6 +2045,9 @@ function App() {
   const selectGeofenceId = (id: string) => {
     setGeofenceDeleteConfirmId(null)
     setSelectedGeofenceId(id)
+    if (role === 'admin') {
+      setAdminGeofencePanelExpanded(true)
+    }
   }
 
   if (isAuthLoading) {
@@ -2111,12 +2270,6 @@ function App() {
               ref={mapRef}
             >
               <MapPaneSetup />
-              {role === 'admin' && selectedGeofence && (
-                <div className="selected-geofence-chip">
-                  Selected: {selectedGeofence.name}
-                  {selectedGeofence.assigned_email ? ` (${selectedGeofence.assigned_email})` : ''}
-                </div>
-              )}
               {role === 'canvasser' && (
                 <div className="map-help-anchor" ref={canvasserMapHelpRef}>
                   <button
@@ -2488,86 +2641,119 @@ function App() {
             </aside>
           )}
           {role === 'admin' && (
-            <aside className="geofence-panel">
-              <div className="geofence-panel-header">
-                <h3>Geofence Details</h3>
-                {selectedGeofence ? (
-                  <div className="geofence-panel-menu-anchor" ref={geofencePanelMenuRef}>
-                    <button
-                      type="button"
-                      className="geofence-panel-menu-trigger"
-                      aria-label="Geofence actions"
-                      aria-expanded={geofencePanelMenuOpen}
-                      aria-haspopup="menu"
-                      aria-controls="geofence-panel-actions-menu"
-                      onClick={() => setGeofencePanelMenuOpen((open) => !open)}
-                    >
-                      <span className="geofence-panel-menu-dots" aria-hidden="true">
-                        ⋮
-                      </span>
-                    </button>
-                    {geofencePanelMenuOpen ? (
-                      <div
-                        id="geofence-panel-actions-menu"
-                        className="geofence-panel-actions-menu"
-                        role="menu"
+            <aside
+              className={`geofence-panel admin-geofence-panel${
+                adminGeofencePanelExpanded ? ' admin-geofence-panel--expanded' : ''
+              }`}
+            >
+              <button
+                type="button"
+                className="admin-geofence-mobile-strip"
+                aria-expanded={adminGeofencePanelExpanded}
+                aria-controls="admin-geofence-expandable"
+                onClick={() => setAdminGeofencePanelExpanded((open) => !open)}
+                aria-label={
+                  adminGeofencePanelExpanded
+                    ? 'Hide geofence details panel'
+                    : 'Show geofence details panel'
+                }
+              >
+                <div className="admin-geofence-mobile-strip-row">
+                  <span className="admin-geofence-mobile-strip-title">{geofenceDetailsTitle}</span>
+                  <span className="admin-geofence-mobile-strip-chevron" aria-hidden="true">
+                    {adminGeofencePanelExpanded ? '▲' : '▼'}
+                  </span>
+                </div>
+              </button>
+              <div id="admin-geofence-expandable" className="admin-geofence-expandable">
+                <div className="geofence-panel-header">
+                  <h3>{geofenceDetailsTitle}</h3>
+                  {selectedGeofence ? (
+                    <span className="admin-geofence-header-metric">
+                      {isGeofenceProgressLoading
+                        ? 'Loading...'
+                        : geofenceProgress
+                          ? `${geofenceProgress.canvassed}/${geofenceProgress.total} canvassed`
+                          : '0/0 canvassed'}
+                    </span>
+                  ) : null}
+                  {selectedGeofence ? (
+                    <div className="geofence-panel-menu-anchor" ref={geofencePanelMenuRef}>
+                      <button
+                        type="button"
+                        className="geofence-panel-menu-trigger"
                         aria-label="Geofence actions"
+                        aria-expanded={geofencePanelMenuOpen}
+                        aria-haspopup="menu"
+                        aria-controls="geofence-panel-actions-menu"
+                        onClick={() => setGeofencePanelMenuOpen((open) => !open)}
                       >
-                        <button
-                          type="button"
-                          className="geofence-panel-menu-item"
-                          role="menuitem"
-                          disabled={
-                            isGeofenceProgressLoading ||
-                            !geofenceProgress ||
-                            geofenceProgress.remaining <= 0
-                          }
-                          onClick={() => {
-                            setGeofencePanelMenuOpen(false)
-                            setMarkAllTargetCanvassed(true)
-                            setMarkAllCompleteDialogOpen(true)
-                          }}
+                        <span className="geofence-panel-menu-dots" aria-hidden="true">
+                          ⋮
+                        </span>
+                      </button>
+                      {geofencePanelMenuOpen ? (
+                        <div
+                          id="geofence-panel-actions-menu"
+                          className="geofence-panel-actions-menu"
+                          role="menu"
+                          aria-label="Geofence actions"
                         >
-                          <GeofenceMarkCanvassedIcon />
-                          <span>Mark all addresses canvassed</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="geofence-panel-menu-item"
-                          role="menuitem"
-                          disabled={
-                            isGeofenceProgressLoading ||
-                            !geofenceProgress ||
-                            geofenceProgress.canvassed <= 0
-                          }
-                          onClick={() => {
-                            setGeofencePanelMenuOpen(false)
-                            setMarkAllTargetCanvassed(false)
-                            setMarkAllCompleteDialogOpen(true)
-                          }}
-                        >
-                          <GeofenceMarkCanvassedIcon />
-                          <span>Mark all addresses uncanvassed</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="geofence-panel-menu-item geofence-panel-menu-item--danger"
-                          role="menuitem"
-                          onClick={() => {
-                            setGeofencePanelMenuOpen(false)
-                            setGeofenceDeleteConfirmId(selectedGeofenceId)
-                          }}
-                        >
-                          <GeofenceTrashIcon />
-                          <span>Delete geofence</span>
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-              {selectedGeofence ? (
-                <>
+                          <button
+                            type="button"
+                            className="geofence-panel-menu-item"
+                            role="menuitem"
+                            disabled={
+                              isGeofenceProgressLoading ||
+                              !geofenceProgress ||
+                              geofenceProgress.remaining <= 0
+                            }
+                            onClick={() => {
+                              setGeofencePanelMenuOpen(false)
+                              setMarkAllTargetCanvassed(true)
+                              setMarkAllCompleteDialogOpen(true)
+                            }}
+                          >
+                            <GeofenceMarkCanvassedIcon />
+                            <span>Mark all addresses canvassed</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="geofence-panel-menu-item"
+                            role="menuitem"
+                            disabled={
+                              isGeofenceProgressLoading ||
+                              !geofenceProgress ||
+                              geofenceProgress.canvassed <= 0
+                            }
+                            onClick={() => {
+                              setGeofencePanelMenuOpen(false)
+                              setMarkAllTargetCanvassed(false)
+                              setMarkAllCompleteDialogOpen(true)
+                            }}
+                          >
+                            <GeofenceMarkCanvassedIcon />
+                            <span>Mark all addresses uncanvassed</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="geofence-panel-menu-item geofence-panel-menu-item--danger"
+                            role="menuitem"
+                            onClick={() => {
+                              setGeofencePanelMenuOpen(false)
+                              setGeofenceDeleteConfirmId(selectedGeofenceId)
+                            }}
+                          >
+                            <GeofenceTrashIcon />
+                            <span>Delete geofence</span>
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+                {selectedGeofence ? (
+                  <>
                   <label>
                     Name
                     <input
@@ -2578,59 +2764,79 @@ function App() {
                   </label>
                   <label>
                     Assigned email
-                    <input
-                      type="email"
-                      value={geofenceEmailDraft}
-                      onChange={(event) => setGeofenceEmailDraft(event.target.value)}
-                      placeholder="canvasser@example.com"
-                    />
+                    <div className="geofence-assignee-picker" ref={geofenceAssigneePickerRef}>
+                      <button
+                        type="button"
+                        className="geofence-assignee-picker-trigger"
+                        aria-haspopup="listbox"
+                        aria-expanded={assigneePickerOpen}
+                        aria-controls="geofence-assignee-picker-listbox"
+                        onClick={() => setAssigneePickerOpen((open) => !open)}
+                      >
+                        <span>{selectedAssigneeOption?.label ?? 'Unassigned'}</span>
+                        <span className="geofence-assignee-picker-caret" aria-hidden="true">
+                          ▾
+                        </span>
+                      </button>
+                      {assigneePickerOpen ? (
+                        <div
+                          id="geofence-assignee-picker-listbox"
+                          className="geofence-assignee-picker-listbox"
+                          role="listbox"
+                          aria-label="Assign geofence email"
+                        >
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={!geofenceEmailDraft.trim()}
+                            className={`geofence-assignee-picker-option${
+                              !geofenceEmailDraft.trim()
+                                ? ' geofence-assignee-picker-option--selected'
+                                : ''
+                            }`}
+                            onClick={() => {
+                              setGeofenceEmailDraft('')
+                              setAssigneePickerOpen(false)
+                            }}
+                          >
+                            Unassigned
+                          </button>
+                          {geofenceAssigneeOptions.map((option) => {
+                            const selected =
+                              option.value === geofenceEmailDraft.trim().toLowerCase()
+                            return (
+                              <button
+                                key={option.value}
+                                type="button"
+                                role="option"
+                                aria-selected={selected}
+                                className={`geofence-assignee-picker-option${
+                                  selected ? ' geofence-assignee-picker-option--selected' : ''
+                                }`}
+                                onClick={() => {
+                                  setGeofenceEmailDraft(option.value)
+                                  setAssigneePickerOpen(false)
+                                }}
+                              >
+                                {option.label}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
                   </label>
                   <div className="geofence-save-row">
                     <button type="button" className="status-button" onClick={() => void saveSelectedGeofence()}>
                       Save geofence
                     </button>
                   </div>
-                  <div className="geofence-progress">
-                    {isGeofenceProgressLoading ? (
-                      <p>Loading progress...</p>
-                    ) : geofenceProgress ? (
-                      <>
-                        <div className="progress-summary">
-                          <div className="progress-headline">
-                            <span>Complete</span>
-                            <strong>{geofenceCompletionPercent}%</strong>
-                          </div>
-                          <div className="progress-bar-track" aria-hidden="true">
-                            <div
-                              className="progress-bar-fill"
-                              style={{ width: `${geofenceCompletionPercent}%` }}
-                            />
-                          </div>
-                        </div>
-                        <div className="metric-grid compact">
-                          <div className="metric-card emphasis">
-                            <span>Remaining</span>
-                            <strong>{geofenceProgress.remaining}</strong>
-                          </div>
-                          <div className="metric-card">
-                            <span>Done</span>
-                            <strong>{geofenceProgress.canvassed}</strong>
-                          </div>
-                          <div className="metric-card">
-                            <span>Total</span>
-                            <strong>{geofenceProgress.total}</strong>
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <p>Select a geofence to see progress.</p>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <p>Draw or click a geofence to edit assignment and view progress.</p>
-              )}
-              {geofenceMessage && <p className="access-message">{geofenceMessage}</p>}
+                  </>
+                ) : (
+                  <p>Draw or click a geofence to edit assignment and view progress.</p>
+                )}
+                {geofenceMessage && <p className="access-message">{geofenceMessage}</p>}
+              </div>
               {showGeofenceDeleteDialog && selectedGeofence && (
                 <div
                   className="geofence-confirm-backdrop"
@@ -2727,128 +2933,254 @@ function App() {
       ) : null}
       {role === 'admin' && activeAdminView === 'access' && (
         <section className="admin-panel">
-          <h2>Admin Access Panel</h2>
-          <p>
-            Add by email and set role. Once added here, that user can request a magic link.
-          </p>
-          <form className="access-form" onSubmit={(event) => void upsertProfile(event)}>
-            <input
-              type="email"
-              placeholder="User email"
-              value={newProfileEmail}
-              onChange={(event) => setNewProfileEmail(event.target.value)}
-            />
-            <select
-              value={newProfileRole}
-              onChange={(event) =>
-                setNewProfileRole(event.target.value as 'admin' | 'canvasser')
-              }
+          <div className="admin-panel-header">
+            <div>
+              <h2>Admin Access Panel</h2>
+              <p>Manage who can sign in and what role they have.</p>
+            </div>
+            <button
+              type="button"
+              className="status-button"
+              onClick={() => {
+                setAccessMessage('')
+                setAddUserModalOpen(true)
+              }}
             >
-              <option value="canvasser">canvasser</option>
-              <option value="admin">admin</option>
-            </select>
-            <button type="submit">Save access</button>
-          </form>
+              Add user
+            </button>
+          </div>
           {accessMessage && <p className="access-message">{accessMessage}</p>}
           <div className="profiles-table-wrap">
             <table className="profiles-table">
               <thead>
                 <tr>
+                  <th>Name</th>
                   <th>Email</th>
                   <th>Role</th>
                   <th>Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {isProfilesLoading ? (
                   <tr>
-                    <td colSpan={3}>Loading access list...</td>
+                    <td colSpan={5}>Loading access list...</td>
                   </tr>
                 ) : (
-                  accessRows.map((entry) => (
+                  accessRows.map((entry) => {
+                    const isEditingUser = editingUserEmail.toLowerCase() === entry.email.toLowerCase()
+                    return (
                     <tr key={entry.email}>
-                      <td>
-                        <div className="email-cell">
-                          {editingEmail.toLowerCase() === entry.email.toLowerCase() ? (
-                            <input
-                              className="table-email-input"
-                              type="email"
-                              value={editingEmailDraft}
-                              onChange={(event) => setEditingEmailDraft(event.target.value)}
-                            />
-                          ) : (
-                            <span>{entry.email}</span>
-                          )}
-                          {editingEmail.toLowerCase() === entry.email.toLowerCase() ? (
-                            <>
-                              <button
-                                type="button"
-                                className="icon-btn"
-                                onClick={() => void saveEditedEmail(entry.email)}
-                                title="Save email"
-                                aria-label="Save email"
-                              >
-                                ✓
-                              </button>
-                              <button
-                                type="button"
-                                className="icon-btn"
-                                onClick={cancelEditEmail}
-                                title="Cancel edit"
-                                aria-label="Cancel edit"
-                              >
-                                ✕
-                              </button>
-                            </>
-                          ) : (
+                      <td data-label="Name">
+                        {isEditingUser ? (
+                          <input
+                            className="table-email-input"
+                            type="text"
+                            value={editingUserNameDraft}
+                            onChange={(event) => setEditingUserNameDraft(event.target.value)}
+                          />
+                        ) : (
+                          accessDisplayName(entry)
+                        )}
+                      </td>
+                      <td data-label="Email">
+                        {isEditingUser ? (
+                          <input
+                            className="table-email-input"
+                            type="email"
+                            value={editingUserEmailDraft}
+                            onChange={(event) => setEditingUserEmailDraft(event.target.value)}
+                          />
+                        ) : (
+                          <span>{entry.email}</span>
+                        )}
+                      </td>
+                      <td data-label="Role">
+                        {isEditingUser ? (
+                          <div className="role-edit-toggle" role="radiogroup" aria-label="User role">
                             <button
                               type="button"
-                              className="icon-btn"
-                              onClick={() => startEditEmail(entry.email)}
-                              title="Edit email"
-                              aria-label="Edit email"
+                              className={`role-edit-toggle-btn${
+                                editingUserRoleDraft === 'canvasser'
+                                  ? ' role-edit-toggle-btn--active'
+                                  : ''
+                              }`}
+                              aria-pressed={editingUserRoleDraft === 'canvasser'}
+                              disabled={entry.role === 'admin' && adminCount <= 1}
+                              onClick={() => setEditingUserRoleDraft('canvasser')}
                             >
-                              ✎
+                              Canvasser
                             </button>
-                          )}
-                          <button
-                            type="button"
-                            className="icon-btn danger"
-                            disabled={entry.role === 'admin' && adminCount <= 1}
-                            onClick={() => void deleteUserAccess(entry.email)}
-                            title="Delete user access"
-                            aria-label="Delete user access"
-                          >
-                            🗑
-                          </button>
-                        </div>
+                            <button
+                              type="button"
+                              className={`role-edit-toggle-btn${
+                                editingUserRoleDraft === 'admin' ? ' role-edit-toggle-btn--active' : ''
+                              }`}
+                              aria-pressed={editingUserRoleDraft === 'admin'}
+                              onClick={() => setEditingUserRoleDraft('admin')}
+                            >
+                              Admin
+                            </button>
+                          </div>
+                        ) : (
+                          <span>{entry.role}</span>
+                        )}
                       </td>
-                      <td>
-                        <select
-                          className="role-select"
-                          value={entry.role}
-                          onChange={(event) =>
-                            void updateProfileRole(
-                              entry.email,
-                              event.target.value as 'admin' | 'canvasser',
-                            )
-                          }
-                        >
-                          <option value="canvasser" disabled={entry.role === 'admin' && adminCount <= 1}>
-                            canvasser
-                          </option>
-                          <option value="admin">admin</option>
-                        </select>
-                      </td>
-                      <td>
+                      <td data-label="Status">
                         <span className={`status-pill ${entry.status}`}>{entry.status}</span>
                       </td>
+                      <td className="profiles-actions-cell" data-label="Actions">
+                        {isEditingUser ? (
+                          <div className="table-row-inline-actions">
+                            <button
+                              type="button"
+                              className="row-action-btn"
+                              onClick={() => void saveEditedUser(entry.email)}
+                            >
+                              Save changes
+                            </button>
+                            <button type="button" className="row-action-btn" onClick={cancelEditUser}>
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <div
+                            className="access-row-actions-menu-anchor"
+                            ref={openAccessActionsEmail === entry.email ? accessActionsMenuRef : null}
+                          >
+                            <button
+                              type="button"
+                              className="access-row-actions-trigger"
+                              aria-label="User actions"
+                              aria-expanded={openAccessActionsEmail === entry.email}
+                              aria-haspopup="menu"
+                              aria-controls={`access-row-actions-menu-${entry.email}`}
+                              onClick={() =>
+                                setOpenAccessActionsEmail((current) =>
+                                  current === entry.email ? '' : entry.email,
+                                )
+                              }
+                            >
+                              <span className="access-row-actions-dots" aria-hidden="true">
+                                ⋮
+                              </span>
+                            </button>
+                            {openAccessActionsEmail === entry.email ? (
+                              <div
+                                id={`access-row-actions-menu-${entry.email}`}
+                                className="access-row-actions-menu"
+                                role="menu"
+                                aria-label="User actions"
+                              >
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className="access-row-actions-menu-item"
+                                  onClick={() => startEditUser(entry)}
+                                >
+                                  Edit user
+                                </button>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className="access-row-actions-menu-item access-row-actions-menu-item--danger"
+                                  disabled={entry.role === 'admin' && adminCount <= 1}
+                                  onClick={() => {
+                                    setOpenAccessActionsEmail('')
+                                    void deleteUserAccess(entry.email)
+                                  }}
+                                >
+                                  Delete user
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
+                      </td>
                     </tr>
-                  ))
+                  )})
                 )}
               </tbody>
             </table>
           </div>
+          {addUserModalOpen ? (
+            <div
+              className="geofence-confirm-backdrop"
+              role="presentation"
+              onClick={(event) => {
+                if (event.target === event.currentTarget && !isAddingUser) {
+                  setAddUserModalOpen(false)
+                }
+              }}
+            >
+              <div
+                className="geofence-confirm-dialog add-user-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="add-user-dialog-title"
+              >
+                <h4 id="add-user-dialog-title">Add user</h4>
+                <form className="access-form access-form--modal" onSubmit={(event) => void upsertProfile(event)}>
+                  <label>
+                    Name
+                    <input
+                      type="text"
+                      placeholder="Full name"
+                      value={newProfileName}
+                      onChange={(event) => setNewProfileName(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Email
+                    <input
+                      type="email"
+                      placeholder="Email address"
+                      value={newProfileEmail}
+                      onChange={(event) => setNewProfileEmail(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    User type
+                    <div className="role-edit-toggle add-user-role-toggle" role="radiogroup" aria-label="New user role">
+                      <button
+                        type="button"
+                        className={`role-edit-toggle-btn${
+                          newProfileRole === 'canvasser' ? ' role-edit-toggle-btn--active' : ''
+                        }`}
+                        aria-pressed={newProfileRole === 'canvasser'}
+                        onClick={() => setNewProfileRole('canvasser')}
+                      >
+                        Canvasser
+                      </button>
+                      <button
+                        type="button"
+                        className={`role-edit-toggle-btn${
+                          newProfileRole === 'admin' ? ' role-edit-toggle-btn--active' : ''
+                        }`}
+                        aria-pressed={newProfileRole === 'admin'}
+                        onClick={() => setNewProfileRole('admin')}
+                      >
+                        Admin
+                      </button>
+                    </div>
+                  </label>
+                  <div className="geofence-confirm-actions">
+                    <button
+                      type="button"
+                      className="geofence-confirm-cancel"
+                      disabled={isAddingUser}
+                      onClick={() => setAddUserModalOpen(false)}
+                    >
+                      Cancel
+                    </button>
+                    <button type="submit" className="geofence-confirm-apply" disabled={isAddingUser}>
+                      {isAddingUser ? 'Adding…' : 'Add user'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          ) : null}
         </section>
       )}
     </main>

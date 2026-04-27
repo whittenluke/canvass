@@ -832,7 +832,10 @@
 }
 
 .status-button {
-  width: 100%;
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   border-radius: 8px;
   background: #334e68;
@@ -865,6 +868,18 @@
   font-size: 0.9rem;
 }
 
+.admin-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.admin-panel-header .status-button {
+  align-self: flex-start;
+}
+
 .access-form {
   display: grid;
   grid-template-columns: 1.4fr 0.8fr auto;
@@ -889,6 +904,33 @@
   cursor: pointer;
 }
 
+.access-form.access-form--modal {
+  grid-template-columns: 1fr;
+  gap: 0.6rem;
+}
+
+.access-form.access-form--modal label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #334e68;
+}
+
+.add-user-dialog {
+  width: min(460px, 100%);
+}
+
+.add-user-dialog > p {
+  margin-bottom: 0.7rem;
+}
+
+.add-user-role-toggle {
+  width: 100%;
+}
+
 .access-message {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
@@ -897,13 +939,16 @@
 
 .profiles-table-wrap {
   margin-top: 0.75rem;
+  max-width: 100%;
   overflow-x: auto;
+  overflow-y: visible;
 }
 
 .profiles-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.9rem;
+  table-layout: fixed;
 }
 
 .profiles-table th,
@@ -911,6 +956,8 @@
   border-bottom: 1px solid #e4ecf2;
   padding: 0.5rem 0.25rem;
   text-align: left;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
 }
 
 .profiles-table td button {
@@ -938,20 +985,157 @@
   display: flex;
   align-items: center;
   gap: 0.35rem;
+  min-width: 0;
 }
 
-.icon-btn {
-  width: 2rem;
-  height: 2rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.email-cell > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.row-action-btn {
   border: 1px solid #bcccdc;
   border-radius: 8px;
   background: #f8fafc;
   color: #102a43;
-  font-size: 0.95rem;
+  padding: 0.35rem 0.6rem;
+  font-weight: 600;
   cursor: pointer;
+}
+
+.access-row-actions-menu-anchor {
+  position: relative;
+}
+
+.access-row-actions-trigger {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid #bcccdc;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #102a43;
+  padding: 0;
+  cursor: pointer;
+}
+
+.access-row-actions-dots {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.access-row-actions-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 120;
+  min-width: 9.5rem;
+  padding: 0.2rem;
+  border: 1px solid #d9e2ec;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(16, 42, 67, 0.14);
+}
+
+.access-row-actions-menu-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #334e68;
+  margin: 0;
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.access-row-actions-menu-item:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.access-row-actions-menu-item--danger {
+  color: #9b2c2c;
+}
+
+.access-row-actions-menu-item--danger:hover:not(:disabled) {
+  background: #fef2f2;
+  color: #7f1d1d;
+}
+
+.access-row-actions-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.profiles-actions-cell {
+  text-align: right;
+  width: 1%;
+  white-space: nowrap;
+}
+
+.table-row-inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.role-edit-toggle {
+  display: inline-flex;
+  border: 1px solid #bcccdc;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.role-edit-toggle-btn {
+  border: 0;
+  margin: 0;
+  padding: 0.35rem 0.6rem;
+  background: #fff;
+  color: #334e68;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.role-edit-toggle-btn + .role-edit-toggle-btn {
+  border-left: 1px solid #d9e2ec;
+}
+
+.role-edit-toggle-btn--active {
+  background: #334e68;
+  color: #fff;
+}
+
+.role-edit-toggle-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.access-form .role-edit-toggle .role-edit-toggle-btn {
+  background: #ffffff;
+  color: #334e68;
+}
+
+.access-form .role-edit-toggle .role-edit-toggle-btn--active {
+  background: #334e68;
+  color: #ffffff;
+}
+
+.profiles-table .role-edit-toggle .role-edit-toggle-btn {
+  background: #ffffff;
+  color: #334e68;
+}
+
+.profiles-table .role-edit-toggle .role-edit-toggle-btn--active {
+  background: #334e68;
+  color: #ffffff;
 }
 
 .role-select {
@@ -962,18 +1146,14 @@
   background: #fff;
 }
 
-.icon-btn.danger {
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fff5f5;
-}
-
 .table-email-input {
   border: 1px solid #bcccdc;
   border-radius: 8px;
   padding: 0.35rem 0.5rem;
   font: inherit;
-  min-width: 220px;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
 }
 
 .status-pill {
@@ -1037,6 +1217,22 @@
 
 .canvasser-areas-mobile-strip {
   display: none;
+}
+
+.admin-geofence-mobile-strip {
+  display: none;
+}
+
+.admin-geofence-expandable {
+  min-height: 0;
+}
+
+.admin-geofence-header-metric {
+  margin-right: auto;
+  margin-left: 0.15rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #486581;
 }
 
 .canvasser-areas-strip-row {
@@ -1224,7 +1420,8 @@
   color: #334e68;
 }
 
-.geofence-panel input {
+.geofence-panel input,
+.geofence-panel select {
   display: block;
   width: 100%;
   margin-top: 0.2rem;
@@ -1232,6 +1429,98 @@
   border-radius: 8px;
   padding: 0.5rem 0.6rem;
   font: inherit;
+  line-height: 1.35;
+  min-height: 2.5rem;
+  background: #ffffff;
+  color: #102a43;
+  opacity: 1;
+}
+
+.geofence-panel select {
+  appearance: auto;
+  -webkit-appearance: menulist;
+  -moz-appearance: menulist;
+  background-color: #ffffff !important;
+  color: #102a43 !important;
+  opacity: 1 !important;
+  color-scheme: light;
+}
+
+.geofence-panel select option {
+  background-color: #ffffff !important;
+  color: #102a43 !important;
+}
+
+.geofence-panel select optgroup {
+  background-color: #ffffff !important;
+  color: #334e68 !important;
+}
+
+.geofence-assignee-picker {
+  position: relative;
+  margin-top: 0.2rem;
+}
+
+.geofence-assignee-picker-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #bcccdc;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #102a43;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.geofence-assignee-picker-caret {
+  flex-shrink: 0;
+  color: #486581;
+}
+
+.geofence-assignee-picker-listbox {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 0.25rem;
+  border: 1px solid #d9e2ec;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 10px 30px rgba(16, 42, 67, 0.2);
+}
+
+.geofence-assignee-picker-option {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0.45rem 0.55rem;
+  border: 0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #102a43;
+  font: inherit;
+  font-size: 0.86rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.geofence-assignee-picker-option:hover {
+  background: #f0f4f8;
+}
+
+.geofence-assignee-picker-option--selected {
+  background: #e6f0ff;
+  color: #1e3a8a;
+  font-weight: 600;
 }
 
 .geofence-save-row {
@@ -1414,9 +1703,110 @@
 }
 
 @media (max-width: 900px) {
+  .admin-panel {
+    padding: 0.75rem;
+  }
+
+  .admin-panel h2 {
+    font-size: 0.95rem;
+  }
+
+  .admin-panel p,
+  .access-message {
+    font-size: 0.82rem;
+  }
+
+  .profiles-table-wrap {
+    overflow-x: visible;
+    max-width: 100%;
+  }
+
+  .profiles-table {
+    display: block;
+    width: 100%;
+    font-size: 0.82rem;
+  }
+
+  .profiles-table thead {
+    display: none;
+  }
+
+  .profiles-table tbody {
+    display: block;
+  }
+
+  .profiles-table tr {
+    display: block;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #fff;
+    padding: 0.4rem 0.55rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .profiles-table td {
+    display: grid;
+    grid-template-columns: 88px minmax(0, 1fr);
+    gap: 0.5rem;
+    align-items: center;
+    border: 0;
+    padding: 0.35rem 0;
+    word-break: break-word;
+  }
+
+  .profiles-table td::before {
+    content: attr(data-label);
+    color: #64748b;
+    font-size: 0.74rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+  .profiles-actions-cell {
+    text-align: left;
+    width: auto;
+    white-space: normal;
+  }
+
+  .email-cell {
+    justify-content: flex-start;
+  }
+
+  .table-email-input {
+    min-width: 0;
+    width: 100%;
+    font-size: 0.86rem;
+  }
+
+  .access-row-actions-menu {
+    right: 0;
+    left: auto;
+    min-width: 9rem;
+  }
+
+  .table-row-inline-actions {
+    flex-wrap: wrap;
+  }
+
+  .role-edit-toggle {
+    width: 100%;
+    max-width: 220px;
+  }
+
+  .role-edit-toggle-btn {
+    flex: 1;
+    text-align: center;
+    font-size: 0.8rem;
+  }
+
   .map-page {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr auto;
+  }
+
+  .map-status-line.map-status-line--inline {
+    display: none;
   }
 
   .map-panel {
@@ -1427,6 +1817,87 @@
   .geofence-panel {
     grid-column: 1;
     grid-row: 2;
+  }
+
+  .admin-geofence-panel {
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .admin-geofence-mobile-strip {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    margin: 0;
+    padding: 0.5rem 0.75rem max(0.52rem, env(safe-area-inset-bottom, 0px));
+    border: 0;
+    border-radius: 0;
+    border-top: 1px solid #e2e8f0;
+    background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    flex-shrink: 0;
+  }
+
+  .admin-geofence-mobile-strip:focus-visible {
+    outline: 2px solid #486581;
+    outline-offset: -2px;
+  }
+
+  .admin-geofence-mobile-strip-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+  }
+
+  .admin-geofence-mobile-strip-title {
+    font-size: 0.95rem;
+    font-weight: 800;
+    line-height: 1.2;
+    color: #243b53;
+    flex: 1;
+    min-width: 0;
+    letter-spacing: 0.01em;
+  }
+
+  .admin-geofence-mobile-strip-meta {
+    flex: 1;
+    min-width: 0;
+    text-align: right;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #486581;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .admin-geofence-mobile-strip-chevron {
+    flex-shrink: 0;
+    font-size: 0.62rem;
+    color: #486581;
+    line-height: 1;
+    width: 1.1rem;
+    text-align: center;
+  }
+
+  .admin-geofence-panel .admin-geofence-expandable {
+    padding: 0.7rem 0.75rem max(0.65rem, calc(0.35rem + env(safe-area-inset-bottom, 0px)));
+  }
+
+  .admin-geofence-panel .geofence-panel-header h3 {
+    display: none;
+  }
+
+  .admin-geofence-panel .geofence-panel-header {
+    justify-content: space-between;
+    margin-bottom: 0.45rem;
+  }
+
+  .admin-geofence-panel:not(.admin-geofence-panel--expanded) .admin-geofence-expandable {
+    display: none;
   }
 
   .canvasser-areas-panel {
@@ -1494,6 +1965,14 @@
 }
 
 @media (min-width: 901px) {
+  .admin-geofence-mobile-strip {
+    display: none !important;
+  }
+
+  .admin-geofence-expandable {
+    display: block !important;
+  }
+
   .canvasser-areas-mobile-strip {
     display: none !important;
   }
