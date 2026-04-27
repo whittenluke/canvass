@@ -438,6 +438,18 @@ function getAuthRedirectUrl(pathAndQuery: string): string {
   return `${window.location.origin}${pathAndQuery}`
 }
 
+/** After gated email check: signUp first; if Auth says user exists, sign in instead. */
+function isEmailAlreadyRegisteredSignupError(message: string): boolean {
+  const m = message.toLowerCase()
+  return (
+    m.includes('already been registered') ||
+    m.includes('already registered') ||
+    m.includes('user already exists') ||
+    m.includes('email address is already') ||
+    m.includes('duplicate')
+  )
+}
+
 function MapViewportWatcher({
   onViewportChange,
 }: {
@@ -912,6 +924,9 @@ function App() {
   const [role, setRole] = useState<string>('')
   const [authStep, setAuthStep] = useState<'email' | 'email-instructions' | 'password'>('email')
   const [authEmail, setAuthEmail] = useState('')
+  const [authPasswordIntent, setAuthPasswordIntent] = useState<'sign_in' | 'create_password'>(
+    'create_password',
+  )
   const [authPassword, setAuthPassword] = useState('')
   const [resetPasswordDraft, setResetPasswordDraft] = useState('')
   const [resetPasswordConfirmDraft, setResetPasswordConfirmDraft] = useState('')
@@ -962,10 +977,6 @@ function App() {
   const [canvasserListAddresses, setCanvasserListAddresses] = useState<AddressRow[] | null>(null)
   const [isCanvasserListLoading, setIsCanvasserListLoading] = useState(false)
   const [canvasserListFetchError, setCanvasserListFetchError] = useState('')
-  const [canvasserMobileAreasPanelExpanded, setCanvasserMobileAreasPanelExpanded] = useState(() => {
-    if (typeof window === 'undefined') return false
-    return window.matchMedia('(min-width: 901px)').matches
-  })
   const [adminGeofencePanelExpanded, setAdminGeofencePanelExpanded] = useState(() => {
     if (typeof window === 'undefined') return true
     return window.matchMedia('(min-width: 901px)').matches
@@ -1166,12 +1177,70 @@ function App() {
 
     return Array.from(byEmail.values()).sort((a, b) => a.email.localeCompare(b.email))
   }
+
+  type AdminAccessPanelRpcRow = {
+    email: string
+    role: string
+    first_name: string | null
+    last_name: string | null
+    profile_exists: boolean
+  }
+
+  const accessRowsFromAdminPanelRpc = (raw: unknown): AccessRow[] | null => {
+    let list: unknown = raw
+    if (typeof raw === 'string') {
+      try {
+        list = JSON.parse(raw) as unknown
+      } catch {
+        return null
+      }
+    }
+    if (!Array.isArray(list)) return null
+    const rows: AccessRow[] = []
+    for (const item of list) {
+      if (!item || typeof item !== 'object') continue
+      const r = item as AdminAccessPanelRpcRow
+      const role = r.role === 'admin' ? 'admin' : 'canvasser'
+      rows.push({
+        email: r.email,
+        role,
+        first_name: r.first_name ?? null,
+        last_name: r.last_name ?? null,
+        status: r.profile_exists ? 'active' : 'pending',
+      })
+    }
+    return rows.sort((a, b) => a.email.localeCompare(b.email))
+  }
+
   const refreshAccessList = async () => {
     if (!supabase || role !== 'admin') {
       return
     }
 
     setIsProfilesLoading(true)
+    setAccessMessage('')
+
+    const { data: panelData, error: panelError } = await supabase.rpc('admin_list_access_panel')
+
+    if (!panelError && panelData !== null && panelData !== undefined) {
+      const fromRpc = accessRowsFromAdminPanelRpc(panelData)
+      if (fromRpc) {
+        setAccessRows(fromRpc)
+        setIsProfilesLoading(false)
+        return
+      }
+    }
+
+    const rpcMissing =
+      panelError &&
+      /could not find|does not exist|schema cache/i.test(panelError.message ?? '')
+
+    if (panelError && !rpcMissing) {
+      setAccessMessage(panelError.message ?? 'Failed to load access.')
+      setIsProfilesLoading(false)
+      return
+    }
+
     const { data: accessData, error: accessError } = await supabase
       .from('user_access')
       .select('email,role,first_name,last_name')
@@ -1416,7 +1485,6 @@ function App() {
     const mq = window.matchMedia('(max-width: 900px)')
     const onChange = () => {
       if (mq.matches) {
-        setCanvasserMobileAreasPanelExpanded(false)
         setAdminGeofencePanelExpanded(false)
       } else {
         setAdminGeofencePanelExpanded(true)
@@ -1957,18 +2025,45 @@ function App() {
       setAuthMessage('Enter your password.')
       return
     }
-    setIsAuthSubmitting(true)
-    setAuthMessage('')
-    const { error } = await supabase.auth.signInWithPassword({
-      email: normalizedEmail,
-      password,
-    })
-    setIsAuthSubmitting(false)
-
-    if (error) {
-      setAuthMessage('Invalid email or password.')
+    if (password.length < 8) {
+      setAuthMessage('Password must be at least 8 characters.')
       return
     }
+    setIsAuthSubmitting(true)
+    setAuthMessage('')
+
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+      email: normalizedEmail,
+      password,
+      options: { emailRedirectTo: getAuthRedirectUrl('/') },
+    })
+
+    if (!signUpError) {
+      setIsAuthSubmitting(false)
+      if (signUpData.session) {
+        return
+      }
+      setAuthMessage(
+        'Account created. Check your email to confirm, then sign in here with the same password.',
+      )
+      return
+    }
+
+    if (isEmailAlreadyRegisteredSignupError(signUpError.message)) {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      })
+      setIsAuthSubmitting(false)
+      if (signInError) {
+        setAuthMessage('Invalid email or password.')
+        return
+      }
+      return
+    }
+
+    setIsAuthSubmitting(false)
+    setAuthMessage(signUpError.message || 'Could not create account.')
   }
 
   const continueWithEmail = async (event: FormEvent<HTMLFormElement>) => {
@@ -1984,11 +2079,30 @@ function App() {
       setAuthMessage('Enter your email address.')
       return
     }
+    setIsAuthSubmitting(true)
+    setAuthMessage('')
     const canAttempt = await canAttemptEmailAuth(normalizedEmail)
+    if (!canAttempt) {
+      setIsAuthSubmitting(false)
+      setAuthEmail(normalizedEmail)
+      setAuthPassword('')
+      setAuthStep('email-instructions')
+      return
+    }
+
+    const { data: intentRaw, error: intentError } = await supabase.rpc('access_email_auth_intent', {
+      target_email: normalizedEmail,
+    })
+    const intent =
+      typeof intentRaw === 'string' ? intentRaw.trim() : String(intentRaw ?? '').trim()
+    const nextIntent: 'sign_in' | 'create_password' =
+      !intentError && intent === 'sign_in' ? 'sign_in' : 'create_password'
+
     setAuthEmail(normalizedEmail)
     setAuthPassword('')
-    setAuthStep(canAttempt ? 'password' : 'email-instructions')
-    setAuthMessage('')
+    setAuthPasswordIntent(nextIntent)
+    setAuthStep('password')
+    setIsAuthSubmitting(false)
   }
 
   const sendPasswordResetEmail = async () => {
@@ -2056,6 +2170,7 @@ function App() {
     setResetPasswordDraft('')
     setResetPasswordConfirmDraft('')
     setAuthPassword('')
+    setAuthPasswordIntent('create_password')
     setAuthStep('email')
     setAuthMessage('Password updated. Sign in with your new password.')
   }
@@ -2098,7 +2213,9 @@ function App() {
       return
     }
 
-    setAccessMessage('Access saved. User can now create an account with this email.')
+    setAccessMessage(
+      'Access saved. They can open the app, enter this email, and choose a password (first time) or sign in.',
+    )
     setNewProfileName('')
     setNewProfileEmail('')
     setNewProfileRole('canvasser')
@@ -2352,7 +2469,9 @@ function App() {
               ? 'Enter your assigned email to continue.'
               : authStep === 'email-instructions'
                 ? 'If an account exists for this email, check your inbox for the next step.'
-                : `Sign in for ${authEmail.trim().toLowerCase()}.`}
+                : authPasswordIntent === 'sign_in'
+                  ? `Welcome back. Enter your password for ${authEmail.trim().toLowerCase()}.`
+                  : `Create a password for ${authEmail.trim().toLowerCase()}. Use at least 8 characters.`}
           </p>
           {authStep === 'email' ? (
             <form className="auth-form" onSubmit={(event) => void continueWithEmail(event)}>
@@ -2381,6 +2500,7 @@ function App() {
                   onClick={() => {
                     setAuthPassword('')
                     setAuthMessage('')
+                    setAuthPasswordIntent('create_password')
                     setAuthStep('email')
                   }}
                 >
@@ -2391,14 +2511,18 @@ function App() {
           ) : (
             <form className="auth-form" onSubmit={(event) => void signInWithPassword(event)}>
               <div className="auth-field">
-                <label htmlFor="password">Password</label>
+                <label htmlFor="password">
+                  {authPasswordIntent === 'sign_in' ? 'Password' : 'New password'}
+                </label>
                 <input
                   id="password"
                   type="password"
-                  autoComplete="current-password"
+                  autoComplete={
+                    authPasswordIntent === 'sign_in' ? 'current-password' : 'new-password'
+                  }
                   value={authPassword}
                   onChange={(event) => setAuthPassword(event.target.value)}
-                  placeholder="Enter password"
+                  placeholder="At least 8 characters"
                 />
               </div>
               <button
@@ -2411,7 +2535,11 @@ function App() {
               </button>
               <div className="auth-actions">
                 <button type="submit" className="auth-primary-button" disabled={isAuthSubmitting}>
-                  {isAuthSubmitting ? 'Submitting...' : 'Sign in'}
+                  {isAuthSubmitting
+                    ? 'Submitting...'
+                    : authPasswordIntent === 'sign_in'
+                      ? 'Sign in'
+                      : 'Create password'}
                 </button>
                 <button
                   type="button"
@@ -2420,6 +2548,7 @@ function App() {
                   onClick={() => {
                     setAuthPassword('')
                     setAuthMessage('')
+                    setAuthPasswordIntent('create_password')
                     setAuthStep('email')
                   }}
                 >
@@ -2907,56 +3036,10 @@ function App() {
           </section>
           {role === 'canvasser' && (
             <aside
-              className={`geofence-panel canvasser-areas-panel${
-                canvasserMobileAreasPanelExpanded ? ' canvasser-areas-panel--expanded' : ''
-              }`}
+              className="geofence-panel canvasser-areas-panel canvasser-areas-panel--expanded"
               aria-label="Your assigned areas"
             >
-              <button
-                type="button"
-                className="canvasser-areas-mobile-strip"
-                aria-expanded={canvasserMobileAreasPanelExpanded}
-                aria-controls="canvasser-areas-expandable"
-                onClick={() => setCanvasserMobileAreasPanelExpanded((open) => !open)}
-                aria-label={
-                  canvasserMobileAreasPanelExpanded
-                    ? 'Hide assigned areas breakdown'
-                    : 'Show assigned areas breakdown, counts and progress'
-                }
-              >
-                <div className="canvasser-areas-strip-row">
-                  <span className="canvasser-areas-strip-title">{canvasserAreasTitle}</span>
-                  {assignedGeofenceIdList.length === 0 ? (
-                    <span className="canvasser-areas-strip-meta">No area assigned</span>
-                  ) : isCanvasserListLoading ? (
-                    <span className="canvasser-areas-strip-meta">Loading…</span>
-                  ) : canvasserListFetchError ? (
-                    <span className="canvasser-areas-strip-meta">Error · tap for details</span>
-                  ) : canvasserListProgress ? (
-                    <span className="canvasser-areas-strip-meta">
-                      {canvasserListProgress.done}/{canvasserListProgress.total} canvassed ·{' '}
-                      {canvasserListProgress.percent}%
-                    </span>
-                  ) : (
-                    <span className="canvasser-areas-strip-meta">0/0 canvassed</span>
-                  )}
-                  <span className="canvasser-areas-strip-chevron" aria-hidden="true">
-                    {canvasserMobileAreasPanelExpanded ? '▲' : '▼'}
-                  </span>
-                </div>
-                {assignedGeofenceIdList.length > 0 &&
-                !isCanvasserListLoading &&
-                !canvasserListFetchError ? (
-                  <div className="canvasser-areas-strip-bar" aria-hidden="true">
-                    <div
-                      className="canvasser-areas-strip-bar-fill"
-                      style={{ width: `${canvasserListProgress?.percent ?? 0}%` }}
-                    />
-                  </div>
-                ) : null}
-              </button>
-
-              <div id="canvasser-areas-expandable" className="canvasser-areas-expandable">
+              <div className="canvasser-areas-expandable">
                 <div className="geofence-panel-header canvasser-areas-panel-title-row">
                   <h3>{canvasserAreasTitle}</h3>
                 </div>
@@ -2972,12 +3055,11 @@ function App() {
                   <div className="geofence-progress">
                     <div className="progress-summary">
                       <div className="progress-headline">
-                        <span>Progress</span>
+                        <span>
+                          Progress {canvasserListProgress.done}/{canvasserListProgress.total}
+                        </span>
                         <strong>{canvasserListProgress.percent}%</strong>
                       </div>
-                      <p className="progress-subline">
-                        {canvasserListProgress.done}/{canvasserListProgress.total} canvassed
-                      </p>
                       <div
                         className="progress-bar-track"
                         role="progressbar"
