@@ -1303,6 +1303,10 @@ function App() {
         setIsPasswordRecovery(true)
       } else if (event === 'SIGNED_OUT') {
         setIsPasswordRecovery(false)
+        setAuthStep('email')
+        setAuthPassword('')
+        setAuthPasswordIntent('create_password')
+        setAuthMessage('')
       }
       setSession(currentSession)
       setRole('')
@@ -2225,6 +2229,10 @@ function App() {
     if (!supabase) {
       return
     }
+    setAuthStep('email')
+    setAuthPassword('')
+    setAuthPasswordIntent('create_password')
+    setAuthMessage('')
     await supabase.auth.signOut()
   }
 
@@ -2568,7 +2576,9 @@ function App() {
                   }
                   value={authPassword}
                   onChange={(event) => setAuthPassword(event.target.value)}
-                  placeholder="At least 8 characters"
+                  placeholder={
+                    authPasswordIntent === 'sign_in' ? undefined : 'At least 8 characters'
+                  }
                 />
               </div>
               {authPasswordIntent === 'sign_in' ? (
