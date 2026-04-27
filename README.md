@@ -2,6 +2,11 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
+## PWA icons
+
+PWA and favicon assets are served from `public/icons_and_manifest/icons/`.
+The active web app manifest is `public/manifest.webmanifest`, and `index.html` links its favicon/apple-touch-icon entries to that same icon set.
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
