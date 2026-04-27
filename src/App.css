@@ -1628,6 +1628,10 @@
   margin: 0.2rem 0;
 }
 
+.geofence-progress--inline {
+  margin: 0 0 0.55rem;
+}
+
 .metric-grid {
   margin-top: 0.5rem;
   display: grid;

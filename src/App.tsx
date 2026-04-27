@@ -942,6 +942,10 @@ function App() {
     const title = draft || persisted
     return title ? `${title} details` : 'Geofence details'
   }, [selectedGeofence, geofenceNameDraft])
+  const geofenceCompletionPercent = useMemo(() => {
+    if (!geofenceProgress || geofenceProgress.total === 0) return 0
+    return Math.round((geofenceProgress.canvassed / geofenceProgress.total) * 100)
+  }, [geofenceProgress])
   const showGeofenceDeleteDialog = Boolean(
     geofenceDeleteConfirmId &&
       geofenceDeleteConfirmId === selectedGeofenceId &&
@@ -2754,6 +2758,26 @@ function App() {
                 </div>
                 {selectedGeofence ? (
                   <>
+                  <div className="geofence-progress geofence-progress--inline">
+                    {isGeofenceProgressLoading ? (
+                      <p>Loading progress...</p>
+                    ) : geofenceProgress ? (
+                      <div className="progress-summary">
+                        <div className="progress-headline">
+                          <span>Complete</span>
+                          <strong>{geofenceCompletionPercent}%</strong>
+                        </div>
+                        <div className="progress-bar-track" aria-hidden="true">
+                          <div
+                            className="progress-bar-fill"
+                            style={{ width: `${geofenceCompletionPercent}%` }}
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <p>Select a geofence to see progress.</p>
+                    )}
+                  </div>
                   <label>
                     Name
                     <input
