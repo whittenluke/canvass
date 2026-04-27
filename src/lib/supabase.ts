@@ -10,4 +10,9 @@ export const missingSupabaseConfig =
 
 export const supabase = missingSupabaseConfig
   ? null
-  : createClient(supabaseUrl, supabasePublishableKey)
+  : createClient(supabaseUrl, supabasePublishableKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+      },
+    })

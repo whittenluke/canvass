@@ -379,7 +379,37 @@ const APPROVED_LOGIN_EMAILS = (import.meta.env.VITE_ALLOWED_LOGIN_EMAILS ?? '')
   .split(',')
   .map((email) => email.trim().toLowerCase())
   .filter(Boolean)
+const RESET_PASSWORD_QUERY_KEY = 'reset_password'
 const AUTH_REDIRECT_OVERRIDE = import.meta.env.VITE_AUTH_REDIRECT_URL?.trim()
+
+function hasResetPasswordIntentInUrl(): boolean {
+  if (typeof window === 'undefined') return false
+  const url = new URL(window.location.href)
+  if (url.searchParams.get(RESET_PASSWORD_QUERY_KEY) === '1') return true
+  if (url.hash.startsWith('#')) {
+    const hashParams = new URLSearchParams(url.hash.slice(1))
+    if (hashParams.get(RESET_PASSWORD_QUERY_KEY) === '1') return true
+    if (hashParams.get('type') === 'recovery') return true
+    if (hashParams.has('access_token') && hashParams.has('refresh_token')) return true
+  }
+  return window.location.href.includes('type=recovery')
+}
+
+function getAuthRedirectUrl(pathAndQuery: string): string {
+  if (AUTH_REDIRECT_OVERRIDE) {
+    const base = AUTH_REDIRECT_OVERRIDE.endsWith('/')
+      ? AUTH_REDIRECT_OVERRIDE.slice(0, -1)
+      : AUTH_REDIRECT_OVERRIDE
+    const suffix = pathAndQuery.startsWith('/') ? pathAndQuery : `/${pathAndQuery}`
+    return `${base}${suffix}`
+  }
+  const host = window.location.hostname
+  const isLocal = host === 'localhost' || host === '127.0.0.1'
+  if (isLocal) {
+    return `http://localhost:8888${pathAndQuery}`
+  }
+  return `${window.location.origin}${pathAndQuery}`
+}
 
 function MapViewportWatcher({
   onViewportChange,
@@ -853,9 +883,14 @@ function NearbyAddressSheet({
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [role, setRole] = useState<string>('')
+  const [authStep, setAuthStep] = useState<'email' | 'email-instructions' | 'password'>('email')
   const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [resetPasswordDraft, setResetPasswordDraft] = useState('')
+  const [resetPasswordConfirmDraft, setResetPasswordConfirmDraft] = useState('')
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false)
   const [authMessage, setAuthMessage] = useState('')
-  const [isSendingLink, setIsSendingLink] = useState(false)
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false)
   const [isAuthLoading, setIsAuthLoading] = useState(true)
   const [addresses, setAddresses] = useState<AddressRow[]>([])
   const [errorMessage, setErrorMessage] = useState('')
@@ -1143,7 +1178,12 @@ function App() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+    } = supabase.auth.onAuthStateChange((event, currentSession) => {
+      if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && hasResetPasswordIntentInUrl())) {
+        setIsPasswordRecovery(true)
+      } else if (event === 'SIGNED_OUT') {
+        setIsPasswordRecovery(false)
+      }
       setSession(currentSession)
       setRole('')
       setAddresses([])
@@ -1156,8 +1196,14 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (hasResetPasswordIntentInUrl()) {
+      setIsPasswordRecovery(true)
+    }
+  }, [])
+
+  useEffect(() => {
     const fetchProfileRole = async () => {
-      if (!supabase || !session?.user) {
+      if (!supabase || !session?.user || isPasswordRecovery) {
         return
       }
       await supabase.rpc('sync_profile_from_access')
@@ -1193,6 +1239,21 @@ function App() {
         resolvedRole = byEmail?.role ?? ''
       }
 
+      if (!resolvedRole && normalizedEmail) {
+        const { data: accessByEmail, error: accessByEmailError } = await supabase
+          .from('user_access')
+          .select('role')
+          .eq('email', normalizedEmail)
+          .maybeSingle()
+
+        if (accessByEmailError) {
+          setErrorMessage(accessByEmailError.message)
+          return
+        }
+
+        resolvedRole = accessByEmail?.role ?? ''
+      }
+
       const nextRole = resolvedRole
       if (!APP_ROLES.has(nextRole)) {
         setErrorMessage(
@@ -1200,12 +1261,14 @@ function App() {
             normalizedEmail ?? 'unknown email'
           }.`,
         )
+        setRole('')
+        return
       }
       setRole(nextRole)
     }
 
     void fetchProfileRole()
-  }, [session])
+  }, [session, isPasswordRecovery])
 
   useEffect(() => {
     const fetchAddresses = async () => {
@@ -1765,7 +1828,49 @@ function App() {
     }
   }
 
-  const sendMagicLink = async (event: FormEvent<HTMLFormElement>) => {
+  const canAttemptEmailAuth = async (normalizedEmail: string): Promise<boolean> => {
+    if (APPROVED_LOGIN_EMAILS.length > 0 && !APPROVED_LOGIN_EMAILS.includes(normalizedEmail)) return false
+    const { data: hasAccess, error: allowError } = await supabase.rpc('can_request_magic_link', {
+      target_email: normalizedEmail,
+    })
+    if (allowError) return false
+    if (!hasAccess) return false
+    return true
+  }
+
+  const signInWithPassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    if (!supabase) {
+      setErrorMessage(missingSupabaseConfig)
+      return
+    }
+
+    const normalizedEmail = authEmail.trim().toLowerCase()
+    const password = authPassword
+    if (!normalizedEmail) {
+      setAuthMessage('Enter your email address.')
+      return
+    }
+    if (!password) {
+      setAuthMessage('Enter your password.')
+      return
+    }
+    setIsAuthSubmitting(true)
+    setAuthMessage('')
+    const { error } = await supabase.auth.signInWithPassword({
+      email: normalizedEmail,
+      password,
+    })
+    setIsAuthSubmitting(false)
+
+    if (error) {
+      setAuthMessage('Invalid email or password.')
+      return
+    }
+  }
+
+  const continueWithEmail = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
     if (!supabase) {
@@ -1775,61 +1880,83 @@ function App() {
 
     const normalizedEmail = authEmail.trim().toLowerCase()
     if (!normalizedEmail) {
-      setAuthMessage('Enter an email address to receive a sign-in link.')
+      setAuthMessage('Enter your email address.')
       return
     }
-    if (
-      APPROVED_LOGIN_EMAILS.length > 0 &&
-      !APPROVED_LOGIN_EMAILS.includes(normalizedEmail)
-    ) {
-      setAuthMessage(
-        'Login blocked by VITE_ALLOWED_LOGIN_EMAILS: this email is not on that list. Netlify → Site configuration → Environment variables → add it (comma-separated) or delete the variable to turn the list off.',
-      )
-      return
-    }
-    const { data: canRequest, error: allowError } = await supabase.rpc(
-      'can_request_magic_link',
-      { target_email: normalizedEmail },
-    )
-    if (allowError) {
-      setAuthMessage(allowError.message)
-      return
-    }
-    if (!canRequest) {
-      setAuthMessage(
-        'Login blocked by database: no row in user_access for this email. Supabase → Table editor → user_access → New row (email + admin or canvasser). Or run the INSERT from documentation/schema.sql.',
-      )
+    const canAttempt = await canAttemptEmailAuth(normalizedEmail)
+    setAuthEmail(normalizedEmail)
+    setAuthPassword('')
+    setAuthStep(canAttempt ? 'password' : 'email-instructions')
+    setAuthMessage('')
+  }
+
+  const sendPasswordResetEmail = async () => {
+    if (!supabase) {
+      setErrorMessage(missingSupabaseConfig)
       return
     }
 
-    setIsSendingLink(true)
+    const normalizedEmail = authEmail.trim().toLowerCase()
+    if (!normalizedEmail) {
+      setAuthMessage('Enter your email address to reset your password.')
+      return
+    }
+
+    setIsAuthSubmitting(true)
     setAuthMessage('')
-    const isLocalHost =
-      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    const defaultRedirect = isLocalHost ? 'http://localhost:8888/' : `${window.location.origin}/`
-    const emailRedirectTo = import.meta.env.DEV
-      ? 'http://localhost:8888/'
-      : AUTH_REDIRECT_OVERRIDE || defaultRedirect
-    const { error } = await supabase.auth.signInWithOtp({
-      email: normalizedEmail,
-      options: {
-        emailRedirectTo,
-      },
-    })
-    setIsSendingLink(false)
+    const redirectTo = getAuthRedirectUrl(`/?${RESET_PASSWORD_QUERY_KEY}=1`)
+    const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, { redirectTo })
+    setIsAuthSubmitting(false)
 
     if (error) {
-      const raw = error.message
-      const signupsBlocked = /signups not allowed/i.test(raw)
-      setAuthMessage(
-        signupsBlocked
-          ? 'Your email is already in Admin Access (the app database), but Supabase Auth is blocking the first magic link because it would create a new login user. In Supabase Dashboard → Authentication → Email: allow new sign-ups, or add each person under Authentication → Users (invite), then send the magic link again.'
-          : raw,
-      )
+      setAuthMessage('Could not send reset instructions right now. Please try again.')
+      return
+    }
+    setAuthMessage('If this email is registered, check your inbox for the next step.')
+  }
+
+  const completePasswordRecovery = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!supabase) {
+      setErrorMessage(missingSupabaseConfig)
+      return
+    }
+    const password = resetPasswordDraft
+    const confirmPassword = resetPasswordConfirmDraft
+    if (!password) {
+      setAuthMessage('Enter a new password.')
+      return
+    }
+    if (password.length < 8) {
+      setAuthMessage('Password must be at least 8 characters.')
+      return
+    }
+    if (password !== confirmPassword) {
+      setAuthMessage('Passwords do not match.')
       return
     }
 
-    setAuthMessage('Check your email for the sign-in link.')
+    setIsAuthSubmitting(true)
+    setAuthMessage('')
+    const { error } = await supabase.auth.updateUser({ password })
+    setIsAuthSubmitting(false)
+    if (error) {
+      setAuthMessage(error.message)
+      return
+    }
+
+    await supabase.auth.signOut()
+    setIsPasswordRecovery(false)
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href)
+      url.searchParams.delete(RESET_PASSWORD_QUERY_KEY)
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+    }
+    setResetPasswordDraft('')
+    setResetPasswordConfirmDraft('')
+    setAuthPassword('')
+    setAuthStep('email')
+    setAuthMessage('Password updated. Sign in with your new password.')
   }
 
   const signOut = async () => {
@@ -1870,7 +1997,7 @@ function App() {
       return
     }
 
-    setAccessMessage('Access saved. User can now request a magic link with this email.')
+    setAccessMessage('Access saved. User can now create an account with this email.')
     setNewProfileName('')
     setNewProfileEmail('')
     setNewProfileRole('canvasser')
@@ -2078,26 +2205,128 @@ function App() {
     )
   }
 
+  if (isPasswordRecovery) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-card">
+          <h1>Canvass</h1>
+          <p>Set your new password.</p>
+          <form className="auth-form" onSubmit={(event) => void completePasswordRecovery(event)}>
+            <label htmlFor="recovery-password">New password</label>
+            <input
+              id="recovery-password"
+              type="password"
+              autoComplete="new-password"
+              value={resetPasswordDraft}
+              onChange={(event) => setResetPasswordDraft(event.target.value)}
+              placeholder="At least 8 characters"
+            />
+            <label htmlFor="recovery-confirm-password">Confirm new password</label>
+            <input
+              id="recovery-confirm-password"
+              type="password"
+              autoComplete="new-password"
+              value={resetPasswordConfirmDraft}
+              onChange={(event) => setResetPasswordConfirmDraft(event.target.value)}
+              placeholder="Re-enter new password"
+            />
+            <button type="submit" className="auth-primary-button" disabled={isAuthSubmitting}>
+              {isAuthSubmitting ? 'Saving...' : 'Save new password'}
+            </button>
+          </form>
+          {authMessage && <p className="auth-message">{authMessage}</p>}
+          {errorMessage && <p className="error-banner">{errorMessage}</p>}
+        </section>
+      </main>
+    )
+  }
+
   if (!session) {
     return (
       <main className="auth-shell">
         <section className="auth-card">
           <h1>Canvass</h1>
-          <p>Sign in with your assigned email address.</p>
-          <form className="auth-form" onSubmit={(event) => void sendMagicLink(event)}>
-            <label htmlFor="email">Email</label>
-            <input
-              id="email"
-              type="email"
-              autoComplete="email"
-              value={authEmail}
-              onChange={(event) => setAuthEmail(event.target.value)}
-              placeholder="you@example.com"
-            />
-            <button type="submit" disabled={isSendingLink}>
-              {isSendingLink ? 'Sending...' : 'Send magic link'}
-            </button>
-          </form>
+          <p>
+            {authStep === 'email'
+              ? 'Enter your assigned email to continue.'
+              : authStep === 'email-instructions'
+                ? 'If an account exists for this email, check your inbox for the next step.'
+                : `Sign in for ${authEmail.trim().toLowerCase()}.`}
+          </p>
+          {authStep === 'email' ? (
+            <form className="auth-form" onSubmit={(event) => void continueWithEmail(event)}>
+              <div className="auth-field">
+                <label htmlFor="email">Email</label>
+                <input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                  placeholder="you@example.com"
+                />
+              </div>
+              <button type="submit" className="auth-primary-button" disabled={isAuthSubmitting}>
+                Continue
+              </button>
+            </form>
+          ) : authStep === 'email-instructions' ? (
+            <form className="auth-form" onSubmit={(event) => event.preventDefault()}>
+              <div className="auth-actions">
+                <button
+                  type="button"
+                  className="auth-primary-button"
+                  disabled={isAuthSubmitting}
+                  onClick={() => {
+                    setAuthPassword('')
+                    setAuthMessage('')
+                    setAuthStep('email')
+                  }}
+                >
+                  Use a different email
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form className="auth-form" onSubmit={(event) => void signInWithPassword(event)}>
+              <div className="auth-field">
+                <label htmlFor="password">Password</label>
+                <input
+                  id="password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={authPassword}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                  placeholder="Enter password"
+                />
+              </div>
+              <button
+                type="button"
+                className="auth-inline-link"
+                disabled={isAuthSubmitting}
+                onClick={() => void sendPasswordResetEmail()}
+              >
+                Forgot password?
+              </button>
+              <div className="auth-actions">
+                <button type="submit" className="auth-primary-button" disabled={isAuthSubmitting}>
+                  {isAuthSubmitting ? 'Submitting...' : 'Sign in'}
+                </button>
+                <button
+                  type="button"
+                  className="auth-secondary-button"
+                  disabled={isAuthSubmitting}
+                  onClick={() => {
+                    setAuthPassword('')
+                    setAuthMessage('')
+                    setAuthStep('email')
+                  }}
+                >
+                  Use a different email
+                </button>
+              </div>
+            </form>
+          )}
           {authMessage && <p className="auth-message">{authMessage}</p>}
           {errorMessage && <p className="error-banner">{errorMessage}</p>}
         </section>
