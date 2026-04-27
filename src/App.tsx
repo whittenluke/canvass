@@ -927,7 +927,8 @@ function App() {
   const [assigneePickerOpen, setAssigneePickerOpen] = useState(false)
   const geofenceAssigneePickerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
-  const [dotsEnabled, setDotsEnabled] = useState(true)
+  const [mapReadySequence, setMapReadySequence] = useState(0)
+  const [dotsEnabled, setDotsEnabled] = useState(false)
   const [addressPopupOpenId, setAddressPopupOpenId] = useState<string | null>(null)
   const [nearbyAddressSheet, setNearbyAddressSheet] = useState<{ memberIds: string[] } | null>(null)
   const [canvasserUiView, setCanvasserUiView] = useState<'map' | 'list'>('map')
@@ -1200,6 +1201,14 @@ function App() {
       setIsPasswordRecovery(true)
     }
   }, [])
+
+  useEffect(() => {
+    if (role === 'admin') {
+      setDotsEnabled(false)
+    } else if (role === 'canvasser') {
+      setDotsEnabled(true)
+    }
+  }, [role])
 
   useEffect(() => {
     const fetchProfileRole = async () => {
@@ -1676,6 +1685,52 @@ function App() {
       window.clearTimeout(timer)
     }
   }, [adminGeofencePanelExpanded, geofencePanelMenuOpen])
+
+  useEffect(() => {
+    if (role !== 'canvasser' || canvasserUiView !== 'map') {
+      return
+    }
+    if (assignedGeofenceIdList.length === 0) {
+      return
+    }
+    const map = mapRef.current
+    if (!map) {
+      return
+    }
+
+    const assignedFences = geofences.filter((g) => assignedGeofenceIdSet.has(g.id))
+    if (assignedFences.length === 0) {
+      return
+    }
+
+    const bounds = L.latLngBounds([])
+    assignedFences.forEach((fence) => {
+      const ring = fence.geometry.coordinates[0] ?? []
+      ring.forEach(([lng, lat]) => {
+        bounds.extend([lat, lng])
+      })
+    })
+    if (!bounds.isValid()) {
+      return
+    }
+
+    // Wait one frame after map/tab mount so Leaflet has final dimensions before fitting.
+    const raf = window.requestAnimationFrame(() => {
+      map.fitBounds(bounds, {
+        padding: [34, 34],
+        maxZoom: 16,
+      })
+    })
+    return () => window.cancelAnimationFrame(raf)
+  }, [
+    role,
+    canvasserUiView,
+    sessionEmail,
+    assignedGeofenceIdList,
+    assignedGeofenceIdSet,
+    geofences,
+    mapReadySequence,
+  ])
 
   const centerPoint = useMemo<[number, number]>(() => RURAL_HALL_CENTER, [])
   const isCloseZoom = (viewport?.zoom ?? 13) >= ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM
@@ -2338,9 +2393,7 @@ function App() {
     <main className="app-shell">
       <header className="top-bar">
         <h1>Canvass</h1>
-        <p className="top-bar-subtitle">
-          Map{role ? ` · ${role}` : ''}
-        </p>
+        <span className="top-bar-user-email">{session.user.email ?? ''}</span>
         <button type="button" className="signout-button" onClick={() => void signOut()}>
           Sign out
         </button>
@@ -2514,6 +2567,7 @@ function App() {
               scrollWheelZoom
               className="map-view"
               ref={mapRef}
+              whenReady={() => setMapReadySequence((v) => v + 1)}
             >
               <MapPaneSetup />
               {role === 'canvasser' && (
@@ -2851,6 +2905,9 @@ function App() {
                         <span>Progress</span>
                         <strong>{canvasserListProgress.percent}%</strong>
                       </div>
+                      <p className="progress-subline">
+                        {canvasserListProgress.done}/{canvasserListProgress.total} canvassed
+                      </p>
                       <div
                         className="progress-bar-track"
                         role="progressbar"
@@ -3281,7 +3338,10 @@ function App() {
                       <td data-label="Status">
                         <span className={`status-pill ${entry.status}`}>{entry.status}</span>
                       </td>
-                      <td className="profiles-actions-cell" data-label="Actions">
+                      <td
+                        className={`profiles-actions-cell${isEditingUser ? ' profiles-actions-cell--editing' : ''}`}
+                        data-label={isEditingUser ? '' : 'Actions'}
+                      >
                         {isEditingUser ? (
                           <div className="table-row-inline-actions">
                             <button

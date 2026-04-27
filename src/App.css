@@ -123,11 +123,25 @@
   display: flex;
   align-items: center;
   gap: 1rem;
+  min-width: 0;
 }
 
 .top-bar h1 {
   margin: 0;
   font-size: 1.2rem;
+}
+
+.top-bar-user-email {
+  margin-left: auto;
+  font-size: 0.88rem;
+  color: #d9e2ec;
+  min-width: 0;
+  flex: 1 1 auto;
+  max-width: min(38vw, 320px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
 }
 
 .top-bar p {
@@ -157,6 +171,7 @@
 }
 
 .signout-button {
+  flex-shrink: 0;
   border: 1px solid #bcccdc;
   border-radius: 8px;
   background: #f0f4f8;
@@ -164,6 +179,23 @@
   padding: 0.45rem 0.7rem;
   font-weight: 600;
   cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .top-bar {
+    gap: 0.55rem;
+    padding: 0.65rem 0.75rem;
+  }
+
+  .top-bar h1 {
+    font-size: 1.05rem;
+    flex-shrink: 0;
+  }
+
+  .top-bar-user-email {
+    max-width: min(34vw, 180px);
+    font-size: 0.8rem;
+  }
 }
 
 .view-nav {
@@ -900,6 +932,7 @@
   border-top: 1px solid #d9e2ec;
   background: #fff;
   padding: 1rem;
+  overflow: visible;
 }
 
 .admin-panel h2 {
@@ -986,8 +1019,9 @@
 .profiles-table-wrap {
   margin-top: 0.75rem;
   max-width: 100%;
-  overflow-x: auto;
-  overflow-y: visible;
+  overflow: visible;
+  min-height: 8.5rem;
+  padding-bottom: 3rem;
 }
 
 .profiles-table {
@@ -1077,6 +1111,7 @@
   top: calc(100% + 4px);
   z-index: 120;
   min-width: 9.5rem;
+  max-width: min(14rem, calc(100vw - 1rem));
   padding: 0.2rem;
   border: 1px solid #d9e2ec;
   border-radius: 10px;
@@ -1738,6 +1773,13 @@
   color: #0f172a;
 }
 
+.progress-subline {
+  margin: -0.05rem 0 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #475569;
+}
+
 .progress-bar-track {
   height: 10px;
   border-radius: 999px;
@@ -1787,10 +1829,11 @@
 
   .profiles-table tr {
     display: block;
+    position: relative;
     border: 1px solid #e2e8f0;
     border-radius: 10px;
     background: #fff;
-    padding: 0.4rem 0.55rem;
+    padding: 0.75rem 0.55rem 0.4rem;
     margin-bottom: 0.5rem;
   }
 
@@ -1813,10 +1856,48 @@
     letter-spacing: 0.02em;
   }
 
-  .profiles-actions-cell {
-    text-align: left;
+  .profiles-actions-cell:not(.profiles-actions-cell--editing) {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.45rem;
+    margin: 0;
+    padding: 0;
+    border: 0;
     width: auto;
+    text-align: right;
+    white-space: nowrap;
+    background: transparent;
+    z-index: 2;
+  }
+
+  .profiles-actions-cell:not(.profiles-actions-cell--editing)::before {
+    content: '';
+    display: none;
+  }
+
+  .profiles-actions-cell.profiles-actions-cell--editing {
+    position: static;
+    display: block;
+    width: auto;
+    text-align: left;
     white-space: normal;
+    padding-top: 0.35rem;
+  }
+
+  .profiles-actions-cell.profiles-actions-cell--editing::before {
+    content: '';
+    display: none;
+  }
+
+  .profiles-actions-cell.profiles-actions-cell--editing .table-row-inline-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+  }
+
+  .profiles-actions-cell.profiles-actions-cell--editing .row-action-btn {
+    width: auto;
+    white-space: nowrap;
   }
 
   .email-cell {
@@ -1832,7 +1913,10 @@
   .access-row-actions-menu {
     right: 0;
     left: auto;
-    min-width: 9rem;
+    top: calc(100% + 4px);
+    bottom: auto;
+    min-width: min(9rem, calc(100vw - 2rem));
+    max-width: calc(100vw - 2rem);
   }
 
   .table-row-inline-actions {
