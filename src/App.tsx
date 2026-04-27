@@ -926,6 +926,19 @@ function App() {
     () => new Set(assignedGeofenceIdList),
     [assignedGeofenceIdList],
   )
+  const assignedGeofenceNames = useMemo(
+    () =>
+      geofences
+        .filter((g) => assignedGeofenceIdSet.has(g.id))
+        .map((g) => g.name.trim())
+        .filter((name) => name.length > 0),
+    [geofences, assignedGeofenceIdSet],
+  )
+  const canvasserAreasTitle = useMemo(() => {
+    if (assignedGeofenceNames.length === 0) return 'Assigned areas'
+    if (assignedGeofenceNames.length === 1) return assignedGeofenceNames[0]!
+    return `${assignedGeofenceNames[0]} +${assignedGeofenceNames.length - 1}`
+  }, [assignedGeofenceNames])
   const geofencesForMap = useMemo(() => {
     if (role !== 'canvasser') return geofences
     return geofences.filter((g) => assignedGeofenceIdSet.has(g.id))
@@ -2559,7 +2572,7 @@ function App() {
                 }
               >
                 <div className="canvasser-areas-strip-row">
-                  <span className="canvasser-areas-strip-title">Assigned areas</span>
+                  <span className="canvasser-areas-strip-title">{canvasserAreasTitle}</span>
                   {assignedGeofenceIdList.length === 0 ? (
                     <span className="canvasser-areas-strip-meta">No area assigned</span>
                   ) : isCanvasserListLoading ? (
@@ -2592,7 +2605,7 @@ function App() {
 
               <div id="canvasser-areas-expandable" className="canvasser-areas-expandable">
                 <div className="geofence-panel-header canvasser-areas-panel-title-row">
-                  <h3>Your assigned areas</h3>
+                  <h3>{canvasserAreasTitle}</h3>
                 </div>
                 {assignedGeofenceIdList.length === 0 ? (
                   <p className="geofence-panel-lead">
@@ -2621,20 +2634,6 @@ function App() {
                           className="progress-bar-fill canvasser-areas-progress-fill"
                           style={{ width: `${canvasserListProgress.percent}%` }}
                         />
-                      </div>
-                    </div>
-                    <div className="metric-grid compact">
-                      <div className="metric-card emphasis canvasser-areas-metric-emphasis">
-                        <span>Remaining</span>
-                        <strong>{canvasserListProgress.total - canvasserListProgress.done}</strong>
-                      </div>
-                      <div className="metric-card canvasser-areas-metric">
-                        <span>Done</span>
-                        <strong>{canvasserListProgress.done}</strong>
-                      </div>
-                      <div className="metric-card canvasser-areas-metric">
-                        <span>Total</span>
-                        <strong>{canvasserListProgress.total}</strong>
                       </div>
                     </div>
                   </div>
