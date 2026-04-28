@@ -824,6 +824,38 @@ function MapHelpInfoIcon() {
   )
 }
 
+function PasswordEyeIcon({ visible }: { visible: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+      <path
+        d="M2 12c2.4-4 5.7-6 10-6s7.6 2 10 6c-2.4 4-5.7 6-10 6s-7.6-2-10-6Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle
+        cx="12"
+        cy="12"
+        r="3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      {!visible ? (
+        <path
+          d="M4 20 20 4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+      ) : null}
+    </svg>
+  )
+}
+
 function NearbyAddressSheet({
   memberIds,
   addresses,
@@ -939,8 +971,13 @@ function App() {
     'create_password',
   )
   const [authPassword, setAuthPassword] = useState('')
+  const [authPasswordConfirm, setAuthPasswordConfirm] = useState('')
+  const [authPasswordVisible, setAuthPasswordVisible] = useState(false)
+  const [authPasswordConfirmVisible, setAuthPasswordConfirmVisible] = useState(false)
   const [resetPasswordDraft, setResetPasswordDraft] = useState('')
   const [resetPasswordConfirmDraft, setResetPasswordConfirmDraft] = useState('')
+  const [resetPasswordVisible, setResetPasswordVisible] = useState(false)
+  const [resetPasswordConfirmVisible, setResetPasswordConfirmVisible] = useState(false)
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(false)
   const [authMessage, setAuthMessage] = useState('')
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false)
@@ -1044,6 +1081,12 @@ function App() {
     if (!geofenceProgress || geofenceProgress.total === 0) return 0
     return Math.round((geofenceProgress.canvassed / geofenceProgress.total) * 100)
   }, [geofenceProgress])
+  const canSubmitPasswordStep =
+    authPasswordIntent === 'sign_in'
+      ? authPassword.length > 0
+      : authPassword.length >= 8 &&
+        authPasswordConfirm.length > 0 &&
+        authPassword === authPasswordConfirm
   const showGeofenceDeleteDialog = Boolean(
     geofenceDeleteConfirmId &&
       geofenceDeleteConfirmId === selectedGeofenceId &&
@@ -1312,6 +1355,9 @@ function App() {
         setIsPasswordRecovery(false)
         setAuthStep('email')
         setAuthPassword('')
+        setAuthPasswordConfirm('')
+        setAuthPasswordVisible(false)
+        setAuthPasswordConfirmVisible(false)
         setAuthPasswordIntent('create_password')
         setAuthMessage('')
       }
@@ -2064,9 +2110,19 @@ function App() {
       setAuthMessage('Enter your password.')
       return
     }
-    if (password.length < 8) {
-      setAuthMessage('Password must be at least 8 characters.')
-      return
+    if (authPasswordIntent === 'create_password') {
+      if (password.length < 8) {
+        setAuthMessage('Password must be at least 8 characters.')
+        return
+      }
+      if (!authPasswordConfirm) {
+        setAuthMessage('Confirm your new password.')
+        return
+      }
+      if (password !== authPasswordConfirm) {
+        setAuthMessage('Passwords do not match.')
+        return
+      }
     }
     setIsAuthSubmitting(true)
     setAuthMessage('')
@@ -2167,6 +2223,9 @@ function App() {
       setIsAuthSubmitting(false)
       setAuthEmail(normalizedEmail)
       setAuthPassword('')
+      setAuthPasswordConfirm('')
+      setAuthPasswordVisible(false)
+      setAuthPasswordConfirmVisible(false)
       setAuthStep('email-instructions')
       return
     }
@@ -2181,6 +2240,9 @@ function App() {
 
     setAuthEmail(normalizedEmail)
     setAuthPassword('')
+    setAuthPasswordConfirm('')
+    setAuthPasswordVisible(false)
+    setAuthPasswordConfirmVisible(false)
     setAuthPasswordIntent(nextIntent)
     setAuthStep('password')
     setIsAuthSubmitting(false)
@@ -2250,7 +2312,12 @@ function App() {
     }
     setResetPasswordDraft('')
     setResetPasswordConfirmDraft('')
+    setResetPasswordVisible(false)
+    setResetPasswordConfirmVisible(false)
     setAuthPassword('')
+    setAuthPasswordConfirm('')
+    setAuthPasswordVisible(false)
+    setAuthPasswordConfirmVisible(false)
     setAuthPasswordIntent('create_password')
     setAuthStep('email')
     setAuthMessage('Password updated. Sign in with your new password.')
@@ -2262,6 +2329,9 @@ function App() {
     }
     setAuthStep('email')
     setAuthPassword('')
+    setAuthPasswordConfirm('')
+    setAuthPasswordVisible(false)
+    setAuthPasswordConfirmVisible(false)
     setAuthPasswordIntent('create_password')
     setAuthMessage('')
     await supabase.auth.signOut()
@@ -2513,23 +2583,43 @@ function App() {
           <p>Set your new password.</p>
           <form className="auth-form" onSubmit={(event) => void completePasswordRecovery(event)}>
             <label htmlFor="recovery-password">New password</label>
-            <input
-              id="recovery-password"
-              type="password"
-              autoComplete="new-password"
-              value={resetPasswordDraft}
-              onChange={(event) => setResetPasswordDraft(event.target.value)}
-              placeholder="At least 8 characters"
-            />
+            <div className="auth-password-input-wrap">
+              <input
+                id="recovery-password"
+                type={resetPasswordVisible ? 'text' : 'password'}
+                autoComplete="new-password"
+                value={resetPasswordDraft}
+                onChange={(event) => setResetPasswordDraft(event.target.value)}
+                placeholder="At least 8 characters"
+              />
+              <button
+                type="button"
+                className="auth-password-toggle"
+                aria-label={resetPasswordVisible ? 'Hide password' : 'Show password'}
+                onClick={() => setResetPasswordVisible((current) => !current)}
+              >
+                <PasswordEyeIcon visible={resetPasswordVisible} />
+              </button>
+            </div>
             <label htmlFor="recovery-confirm-password">Confirm new password</label>
-            <input
-              id="recovery-confirm-password"
-              type="password"
-              autoComplete="new-password"
-              value={resetPasswordConfirmDraft}
-              onChange={(event) => setResetPasswordConfirmDraft(event.target.value)}
-              placeholder="Re-enter new password"
-            />
+            <div className="auth-password-input-wrap">
+              <input
+                id="recovery-confirm-password"
+                type={resetPasswordConfirmVisible ? 'text' : 'password'}
+                autoComplete="new-password"
+                value={resetPasswordConfirmDraft}
+                onChange={(event) => setResetPasswordConfirmDraft(event.target.value)}
+                placeholder="Re-enter new password"
+              />
+              <button
+                type="button"
+                className="auth-password-toggle"
+                aria-label={resetPasswordConfirmVisible ? 'Hide password' : 'Show password'}
+                onClick={() => setResetPasswordConfirmVisible((current) => !current)}
+              >
+                <PasswordEyeIcon visible={resetPasswordConfirmVisible} />
+              </button>
+            </div>
             <button type="submit" className="auth-primary-button" disabled={isAuthSubmitting}>
               {isAuthSubmitting ? 'Saving...' : 'Save new password'}
             </button>
@@ -2581,6 +2671,9 @@ function App() {
                   disabled={isAuthSubmitting}
                   onClick={() => {
                     setAuthPassword('')
+                    setAuthPasswordConfirm('')
+                    setAuthPasswordVisible(false)
+                    setAuthPasswordConfirmVisible(false)
                     setAuthMessage('')
                     setAuthPasswordIntent('create_password')
                     setAuthStep('email')
@@ -2596,19 +2689,52 @@ function App() {
                 <label htmlFor="password">
                   {authPasswordIntent === 'sign_in' ? 'Password' : 'New password'}
                 </label>
-                <input
-                  id="password"
-                  type="password"
-                  autoComplete={
-                    authPasswordIntent === 'sign_in' ? 'current-password' : 'new-password'
-                  }
-                  value={authPassword}
-                  onChange={(event) => setAuthPassword(event.target.value)}
-                  placeholder={
-                    authPasswordIntent === 'sign_in' ? undefined : 'At least 8 characters'
-                  }
-                />
+                <div className="auth-password-input-wrap">
+                  <input
+                    id="password"
+                    type={authPasswordVisible ? 'text' : 'password'}
+                    autoComplete={
+                      authPasswordIntent === 'sign_in' ? 'current-password' : 'new-password'
+                    }
+                    value={authPassword}
+                    onChange={(event) => setAuthPassword(event.target.value)}
+                    placeholder={
+                      authPasswordIntent === 'sign_in' ? undefined : 'At least 8 characters'
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="auth-password-toggle"
+                    aria-label={authPasswordVisible ? 'Hide password' : 'Show password'}
+                    onClick={() => setAuthPasswordVisible((current) => !current)}
+                  >
+                    <PasswordEyeIcon visible={authPasswordVisible} />
+                  </button>
+                </div>
               </div>
+              {authPasswordIntent === 'create_password' ? (
+                <div className="auth-field">
+                  <label htmlFor="password-confirm">Confirm password</label>
+                  <div className="auth-password-input-wrap">
+                    <input
+                      id="password-confirm"
+                      type={authPasswordConfirmVisible ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      value={authPasswordConfirm}
+                      onChange={(event) => setAuthPasswordConfirm(event.target.value)}
+                      placeholder="Re-enter password"
+                    />
+                    <button
+                      type="button"
+                      className="auth-password-toggle"
+                      aria-label={authPasswordConfirmVisible ? 'Hide password' : 'Show password'}
+                      onClick={() => setAuthPasswordConfirmVisible((current) => !current)}
+                    >
+                      <PasswordEyeIcon visible={authPasswordConfirmVisible} />
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               {authPasswordIntent === 'sign_in' ? (
                 <button
                   type="button"
@@ -2620,12 +2746,16 @@ function App() {
                 </button>
               ) : null}
               <div className="auth-actions">
-                <button type="submit" className="auth-primary-button" disabled={isAuthSubmitting}>
+                <button
+                  type="submit"
+                  className="auth-primary-button"
+                  disabled={isAuthSubmitting || !canSubmitPasswordStep}
+                >
                   {isAuthSubmitting
                     ? 'Submitting...'
                     : authPasswordIntent === 'sign_in'
                       ? 'Sign in'
-                      : 'Create password'}
+                      : 'Create account'}
                 </button>
                 <button
                   type="button"
@@ -2633,6 +2763,9 @@ function App() {
                   disabled={isAuthSubmitting}
                   onClick={() => {
                     setAuthPassword('')
+                    setAuthPasswordConfirm('')
+                    setAuthPasswordVisible(false)
+                    setAuthPasswordConfirmVisible(false)
                     setAuthMessage('')
                     setAuthPasswordIntent('create_password')
                     setAuthStep('email')
