@@ -2371,15 +2371,11 @@ function App() {
 
   const handleGeofenceCreated = async (geometry: GeoJSON.Polygon) => {
     if (!supabase || role !== 'admin') return
-    const { data, error } = await supabase
-      .from('geofences')
-      .insert({
-        name: 'New geofence',
-        geometry,
-        assigned_email: null,
-      })
-      .select('id,name,geometry,assigned_email')
-      .single()
+    const { data, error } = await supabase.rpc('admin_insert_geofence', {
+      p_name: 'New geofence',
+      p_geometry: geometry,
+      p_assigned_email: null,
+    })
     if (error) {
       setGeofenceMessage(error.message)
       return
@@ -2395,10 +2391,10 @@ function App() {
   ) => {
     if (!supabase || role !== 'admin') return
     for (const update of updates) {
-      const { error } = await supabase
-        .from('geofences')
-        .update({ geometry: update.geometry })
-        .eq('id', update.id)
+      const { error } = await supabase.rpc('admin_update_geofence_geometry', {
+        p_geofence_id: update.id,
+        p_geometry: update.geometry,
+      })
       if (error) {
         setGeofenceMessage(error.message)
         return
@@ -2414,7 +2410,7 @@ function App() {
 
   const handleGeofenceDeleted = async (ids: string[]): Promise<boolean> => {
     if (!supabase || role !== 'admin') return false
-    const { error } = await supabase.from('geofences').delete().in('id', ids)
+    const { error } = await supabase.rpc('admin_delete_geofences', { p_ids: ids })
     if (error) {
       setGeofenceMessage(error.message)
       return false
@@ -2432,10 +2428,11 @@ function App() {
     if (!supabase || !selectedGeofenceId || role !== 'admin') return
     const name = geofenceNameDraft.trim() || 'Unnamed geofence'
     const assignedEmail = geofenceEmailDraft.trim().toLowerCase() || null
-    const { error } = await supabase
-      .from('geofences')
-      .update({ name, assigned_email: assignedEmail })
-      .eq('id', selectedGeofenceId)
+    const { error } = await supabase.rpc('admin_update_geofence_details', {
+      p_geofence_id: selectedGeofenceId,
+      p_name: name,
+      p_assigned_email: assignedEmail ?? '',
+    })
     if (error) {
       setGeofenceMessage(error.message)
       return
