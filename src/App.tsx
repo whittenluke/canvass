@@ -48,6 +48,13 @@ type GeofenceRow = {
   assigned_email: string | null
 }
 
+type GeofenceRpcRow = {
+  id: string
+  name: string
+  geometry: GeoJSON.Polygon
+  assigned_email: string | null
+}
+
 type GeofenceProgress = {
   total: number
   canvassed: number
@@ -1476,6 +1483,27 @@ function App() {
   useEffect(() => {
     const fetchGeofences = async () => {
       if (!supabase || !session?.user || !APP_ROLES.has(role)) return
+      const { data: rpcData, error: rpcError } = await supabase.rpc('list_visible_geofences')
+      if (!rpcError && rpcData !== null && rpcData !== undefined) {
+        try {
+          const parsed = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData
+          if (Array.isArray(parsed)) {
+            setGeofences((parsed as GeofenceRpcRow[]).map((row) => ({ ...row })))
+            return
+          }
+        } catch {
+          // Fall through to legacy table read if RPC response is malformed.
+        }
+      }
+
+      const rpcMissing =
+        rpcError &&
+        /could not find|does not exist|schema cache/i.test(rpcError.message ?? '')
+      if (rpcError && !rpcMissing) {
+        setGeofenceMessage(rpcError.message)
+        return
+      }
+
       const { data, error } = await supabase
         .from('geofences')
         .select('id,name,geometry,assigned_email')
