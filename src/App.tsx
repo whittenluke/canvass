@@ -1912,7 +1912,10 @@ function App() {
 
     const { error } =
       role === 'admin'
-        ? await supabase.from('addresses').update({ canvassed: nextState }).eq('id', address.id)
+        ? await supabase.rpc('admin_set_address_canvassed', {
+            p_address_id: address.id,
+            p_canvassed: nextState,
+          })
         : await supabase.rpc('canvasser_set_address_canvassed', {
             p_address_id: address.id,
             p_canvassed: nextState,
