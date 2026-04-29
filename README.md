@@ -1,78 +1,60 @@
-# React + TypeScript + Vite
+# Canvass
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Canvass is a role-based field canvassing app. Admins manage access and geofences, while canvassers work addresses in assigned areas.
 
-## PWA icons
+## Tech stack
 
-PWA and favicon assets are served from `public/icons_and_manifest/icons/`.
-The active web app manifest is `public/manifest.webmanifest`, and `index.html` links its favicon/apple-touch-icon entries to that same icon set.
+- Frontend: React + TypeScript + Vite (`src/App.tsx`)
+- Map UI: Leaflet (`react-leaflet`, `leaflet-draw`)
+- Backend/auth/data: Supabase (`src/lib/supabase.ts`)
+- Hosting: Netlify (`netlify.toml`)
 
-Currently, two official plugins are available:
+## Environment variables
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Set these in your local environment:
 
-## React Compiler
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
+- `VITE_ALLOWED_LOGIN_EMAILS` (optional allowlist override)
+- `VITE_AUTH_REDIRECT_URL` (optional auth redirect override)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Supabase migrations and RPC coverage
 
-## Expanding the ESLint configuration
+The app relies on Supabase RPCs called from `src/App.tsx`. To prevent runtime failures in fresh environments, every RPC used by the app should be represented by SQL in `supabase/migrations`.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+Run this check:
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run check:rpc-coverage
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+What it does:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+- Reads RPC calls in `src/App.tsx`
+- Reads function definitions in `supabase/migrations/*.sql`
+- Fails with a missing-function list when an app RPC is not migration-backed
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Recommended workflow after running manual SQL in Supabase:
+
+1. Add/create a migration file with the same function definitions.
+2. Re-run `npm run check:rpc-coverage`.
+3. Commit only when the check passes or you intentionally accept a temporary gap.
+
+## Local development
+
+```bash
+npm install
+npm run dev
 ```
+
+## Build
+
+```bash
+npm run build
+npm run preview
+```
+
+## PWA assets
+
+PWA and favicon assets are in `public/icons_and_manifest/icons/`.  
+Manifest: `public/manifest.webmanifest`.

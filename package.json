@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:rpc-coverage": "node scripts/check-rpc-coverage.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",
