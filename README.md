@@ -54,6 +54,22 @@ npm run build
 npm run preview
 ```
 
+## Refactor verification checklist
+
+When making incremental `App.tsx` decomposition changes, run this sequence between slices:
+
+```bash
+npm run check:rpc-coverage
+npm run lint
+npm run build
+```
+
+Manual smoke checks to run each slice:
+- Email auth gate, sign-in/create-password, and password reset/recovery
+- Admin access panel add/edit/delete
+- Geofence load/create/edit/delete and assignee save
+- Address toggles for admin/canvasser and admin mark-all-in-geofence flow
+
 ## PWA assets
 
 PWA and favicon assets are in `public/icons_and_manifest/icons/`.  

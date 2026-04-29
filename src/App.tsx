@@ -1,370 +1,60 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { FormEvent } from 'react'
-import type { Session } from '@supabase/supabase-js'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CircleMarker,
   MapContainer,
   Marker,
   Popup,
   TileLayer,
-  useMap,
-  useMapEvents,
 } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet-draw'
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon'
 import { point } from '@turf/helpers'
 import { missingSupabaseConfig, supabase } from './lib/supabase'
+import type {
+  AddressRow,
+  AdminGeofenceProgressRow,
+  AdminMarkGeofenceResultRow,
+  GeofenceProgress,
+  GeofenceRow,
+  ViewportBounds,
+} from './features/app/types'
+import {
+  ADDRESS_CLUSTER_CROSS_GAP_METERS,
+  ADDRESS_CLUSTER_MERGE_METERS,
+  ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM,
+  APP_ROLES,
+  DOTS_VISIBLE_MIN_ZOOM_ADMIN,
+  DOTS_VISIBLE_MIN_ZOOM_CANVASSER,
+  RURAL_HALL_CENTER,
+  accessDisplayName,
+  addressHitIsGenerous,
+  addressInAssignedGeofences,
+  adminAddressHitRadiusPx,
+  buildStreetGroups,
+  canvasserAddressHitRadiusPx,
+  clusterAddressesByProximity,
+  clusterAddressesByViewportGrid,
+  fetchAddressStatsInsidePolygon,
+  mergeClustersByCrossGap,
+  sortClustersSinglesFirst,
+} from './features/app/utils'
+import { useAuthFlow } from './features/auth/useAuthFlow'
+import { useAccessPanel } from './features/access/useAccessPanel'
+import { useViewportAddresses } from './features/addresses/useViewportAddresses'
+import { useVisibleGeofences } from './features/geofences/useVisibleGeofences'
+import {
+  GeofenceDrawManager,
+  GeofenceMarkCanvassedIcon,
+  GeofenceTrashIcon,
+  MapHelpInfoIcon,
+  MapPaneSetup,
+  MapStatusLine,
+  MapViewportWatcher,
+  PasswordEyeIcon,
+} from './features/map/MapWorkspace'
+import { CollapsibleStreetBlock, NearbyAddressSheet } from './features/canvasser/CanvasserWorkspace'
 import './App.css'
-
-type AddressRow = {
-  id: string
-  full_address: string
-  lat: number
-  long: number
-  canvassed: boolean
-}
-
-type AccessRow = {
-  email: string
-  role: 'admin' | 'canvasser'
-  status: 'pending' | 'active'
-  first_name: string | null
-  last_name: string | null
-}
-
-type ViewportBounds = {
-  south: number
-  west: number
-  north: number
-  east: number
-  zoom: number
-}
-
-type GeofenceRow = {
-  id: string
-  name: string
-  geometry: GeoJSON.Polygon
-  assigned_email: string | null
-}
-
-type GeofenceRpcRow = {
-  id: string
-  name: string
-  geometry: GeoJSON.Polygon
-  assigned_email: string | null
-}
-
-type GeofenceProgress = {
-  total: number
-  canvassed: number
-  remaining: number
-}
-
-function addressInAssignedGeofences(
-  address: AddressRow,
-  geofences: GeofenceRow[],
-  assignedGeofenceIdSet: Set<string>,
-): boolean {
-  return geofences.some(
-    (g) =>
-      assignedGeofenceIdSet.has(g.id) &&
-      booleanPointInPolygon(point([address.long, address.lat]), g.geometry),
-  )
-}
-
-function splitFullName(fullName: string): { firstName: string | null; lastName: string | null } {
-  const trimmed = fullName.trim()
-  if (!trimmed) return { firstName: null, lastName: null }
-  const parts = trimmed.split(/\s+/)
-  const firstName = parts[0] ?? null
-  const lastName = parts.length > 1 ? parts.slice(1).join(' ') : null
-  return { firstName, lastName }
-}
-
-function accessDisplayName(entry: AccessRow): string {
-  const first = entry.first_name?.trim() ?? ''
-  const last = entry.last_name?.trim() ?? ''
-  const full = `${first} ${last}`.trim()
-  return full || entry.email
-}
-
-type SupabaseClientNonNull = NonNullable<typeof supabase>
-type AdminMarkGeofenceResultRow = {
-  updated_count: number
-  already_canvassed: number
-  total_count: number
-}
-type AdminGeofenceProgressRow = {
-  total_count: number
-  canvassed_count: number
-  remaining_count: number
-}
-
-async function fetchAddressStatsInsidePolygon(
-  client: SupabaseClientNonNull,
-  polygon: GeoJSON.Polygon,
-): Promise<GeofenceProgress> {
-  const coords = polygon.coordinates[0] ?? []
-  if (coords.length === 0) {
-    return { total: 0, canvassed: 0, remaining: 0 }
-  }
-  const lngs = coords.map(([lng]) => lng)
-  const lats = coords.map(([, lat]) => lat)
-  const minLng = Math.min(...lngs)
-  const maxLng = Math.max(...lngs)
-  const minLat = Math.min(...lats)
-  const maxLat = Math.max(...lats)
-
-  let from = 0
-  const pageSize = 1000
-  let total = 0
-  let canvassed = 0
-  let done = false
-  while (!done) {
-    const { data, error } = await client
-      .from('addresses')
-      .select('lat,long,canvassed')
-      .gte('lat', minLat)
-      .lte('lat', maxLat)
-      .gte('long', minLng)
-      .lte('long', maxLng)
-      .range(from, from + pageSize - 1)
-    if (error) {
-      throw new Error(error.message)
-    }
-    const rows = (data as Array<{ lat: number; long: number; canvassed: boolean }>) ?? []
-    rows.forEach((row) => {
-      if (booleanPointInPolygon(point([row.long, row.lat]), polygon)) {
-        total += 1
-        if (row.canvassed) canvassed += 1
-      }
-    })
-    if (rows.length < pageSize) done = true
-    else from += pageSize
-  }
-  return { total, canvassed, remaining: Math.max(total - canvassed, 0) }
-}
-
-/** First line of address with leading house number stripped, for grouping and headers. */
-function streetHeadingFromFullAddress(fullAddress: string): string {
-  const firstLine = fullAddress.split(',')[0]?.trim() ?? fullAddress.trim()
-  const stripped = firstLine.replace(/^(\d+[A-Za-z]?(?:\s*-\s*\d+[A-Za-z]?)?)\s+/, '').trim()
-  return stripped || firstLine
-}
-
-type StreetAddressGroup = {
-  sortKey: string
-  heading: string
-  rows: AddressRow[]
-}
-
-function CollapsibleStreetBlock({
-  blockClassName,
-  defaultOpen,
-  summaryClassName,
-  nameClassName,
-  metaClassName,
-  heading,
-  meta,
-  children,
-}: {
-  blockClassName: string
-  defaultOpen: boolean
-  summaryClassName: string
-  nameClassName: string
-  metaClassName: string
-  heading: string
-  meta: string
-  children: ReactNode
-}) {
-  const [open, setOpen] = useState(defaultOpen)
-  return (
-    <div className={blockClassName}>
-      <button
-        type="button"
-        className={summaryClassName}
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-      >
-        <span className="collapsible-street-heading-group">
-          <span className={nameClassName}>{heading}</span>
-          <span className="collapsible-street-chevron" aria-hidden="true">
-            {open ? '▲' : '▼'}
-          </span>
-        </span>
-        <span className={metaClassName}>{meta}</span>
-      </button>
-      {open ? <div className="collapsible-street-panel">{children}</div> : null}
-    </div>
-  )
-}
-
-function buildStreetGroups(addresses: AddressRow[]): StreetAddressGroup[] {
-  const bucket = new Map<string, { heading: string; rows: AddressRow[]; seen: Set<string> }>()
-  for (const row of addresses) {
-    const heading = streetHeadingFromFullAddress(row.full_address)
-    const sortKey = heading.toLowerCase()
-    let g = bucket.get(sortKey)
-    if (!g) {
-      g = { heading, rows: [], seen: new Set() }
-      bucket.set(sortKey, g)
-    }
-    if (g.seen.has(row.id)) {
-      continue
-    }
-    g.seen.add(row.id)
-    g.rows.push(row)
-  }
-  const groups: StreetAddressGroup[] = [...bucket.entries()].map(([sortKey, g]) => ({
-    sortKey,
-    heading: g.heading,
-    rows: g.rows,
-  }))
-    .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
-  for (const g of groups) {
-    g.rows.sort((x, y) =>
-      x.full_address.localeCompare(y.full_address, undefined, { numeric: true }),
-    )
-  }
-  return groups
-}
-
-function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371000
-  const φ1 = (lat1 * Math.PI) / 180
-  const φ2 = (lat2 * Math.PI) / 180
-  const Δφ = ((lat2 - lat1) * Math.PI) / 180
-  const Δλ = ((lng2 - lng1) * Math.PI) / 180
-  const x =
-    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2)
-  return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x))
-}
-
-function clusterAddressesByProximity(addresses: AddressRow[], maxDistanceM: number): AddressRow[][] {
-  const n = addresses.length
-  if (n === 0) return []
-  const parent = Array.from({ length: n }, (_, i) => i)
-  const find = (i: number): number => {
-    if (parent[i] !== i) parent[i] = find(parent[i])
-    return parent[i]
-  }
-  const union = (a: number, b: number) => {
-    const ra = find(a)
-    const rb = find(b)
-    if (ra !== rb) parent[rb] = ra
-  }
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      if (
-        haversineMeters(addresses[i].lat, addresses[i].long, addresses[j].lat, addresses[j].long) <=
-        maxDistanceM
-      ) {
-        union(i, j)
-      }
-    }
-  }
-  const buckets = new Map<number, AddressRow[]>()
-  for (let i = 0; i < n; i++) {
-    const r = find(i)
-    if (!buckets.has(r)) buckets.set(r, [])
-    buckets.get(r)!.push(addresses[i])
-  }
-  return [...buckets.values()]
-}
-
-/** Min distance (m) between any point in A and any point in B. */
-function crossClusterMinMeters(a: AddressRow[], b: AddressRow[]): number {
-  let min = Infinity
-  for (const pa of a) {
-    for (const pb of b) {
-      const d = haversineMeters(pa.lat, pa.long, pb.lat, pb.long)
-      if (d < min) min = d
-    }
-  }
-  return min
-}
-
-/**
- * Merge cluster pairs whose closest points are within maxGapM.
- * Catches one building split into two graph components when the first pass threshold
- * is shorter than the gap between wings (first pass only unions pairwise ≤ N m).
- */
-function mergeClustersByCrossGap(clusters: AddressRow[][], maxGapM: number): AddressRow[][] {
-  const list = clusters.map((c) => [...c])
-  let merged = true
-  while (merged) {
-    merged = false
-    outer: for (let i = 0; i < list.length; i++) {
-      for (let j = i + 1; j < list.length; j++) {
-        const minD = crossClusterMinMeters(list[i], list[j])
-        if (
-          minD <= maxGapM &&
-          (list[i].length >= 2 || list[j].length >= 2)
-        ) {
-          list[i] = [...list[i], ...list[j]]
-          list.splice(j, 1)
-          merged = true
-          break outer
-        }
-      }
-    }
-  }
-  return list
-}
-
-const METERS_PER_DEGREE_LAT = 111_111
-
-/**
- * O(n) viewport grid: bucket addresses by lat/lng cells sized in ~screen pixels at the current zoom.
- * Used for admin overview so dots can appear earlier without O(n²) proximity clustering on thousands of points.
- */
-function clusterAddressesByViewportGrid(
-  addresses: AddressRow[],
-  viewport: ViewportBounds,
-  cellPixels: number,
-): AddressRow[][] {
-  const centerLat = Math.min(85, Math.max(-85, (viewport.south + viewport.north) / 2))
-  const cosLat = Math.max(0.12, Math.cos((centerLat * Math.PI) / 180))
-  const metersPerPixel = (156543.03392804097 * cosLat) / Math.pow(2, viewport.zoom)
-  const cellMeters = cellPixels * metersPerPixel
-  const dLat = cellMeters / METERS_PER_DEGREE_LAT
-  const dLng = cellMeters / (METERS_PER_DEGREE_LAT * cosLat)
-
-  const buckets = new Map<string, AddressRow[]>()
-  for (const a of addresses) {
-    const gi = Math.floor(a.lat / dLat)
-    const gj = Math.floor(a.long / dLng)
-    const key = `${gi},${gj}`
-    let bucket = buckets.get(key)
-    if (!bucket) {
-      bucket = []
-      buckets.set(key, bucket)
-    }
-    bucket.push(a)
-  }
-  return [...buckets.values()]
-}
-
-function sortClustersSinglesFirst(clusters: AddressRow[][]): AddressRow[][] {
-  const singles = clusters.filter((c) => c.length === 1)
-  const multi = clusters.filter((c) => c.length > 1)
-  return [...singles, ...multi]
-}
-
-const RURAL_HALL_CENTER: [number, number] = [36.2413, -80.2937]
-const APP_ROLES = new Set(['admin', 'canvasser'])
-/** Max addresses loaded for the map viewport (clustering cost grows quickly above ~4–6k at admin detail zoom). */
-const VIEWPORT_LIMIT = 6000
-/** Canvassers need dots a bit earlier while walking. */
-const DOTS_VISIBLE_MIN_ZOOM_CANVASSER = 15
-/** Admin: dots from this zoom; overview uses grid clustering (see ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM). */
-const DOTS_VISIBLE_MIN_ZOOM_ADMIN = 15
-/** Admin: at this zoom and above, use tight proximity clusters (buildings); below, use grid overview clusters. */
-const ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM = 17
-/** Canvasser: max invisible hit radius (px) when zoomed in — easier finger taps. */
-const CANVASSER_ADDRESS_HIT_RADIUS_LOOSE_PX = 26
 
 /** New icon per marker: Leaflet must not reuse one DivIcon instance across multiple markers. */
 function createClusterCountIcon(
@@ -388,617 +78,13 @@ function createClusterCountIcon(
   })
 }
 
-/** Tighter dot/cluster hit targets below this zoom so geofence polygons (below addressPane) get more clicks. */
-function addressHitIsGenerous(zoom: number): boolean {
-  return zoom >= ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM
-}
-
-function canvasserAddressHitRadiusPx(zoom: number): number {
-  if (addressHitIsGenerous(zoom)) return CANVASSER_ADDRESS_HIT_RADIUS_LOOSE_PX
-  if (zoom >= 16) return 15
-  return 10
-}
-
-/** Admin: interactive hit circle radius in px (visual circle stays separate). */
-function adminAddressHitRadiusPx(zoom: number, visualRadius: number): number {
-  if (addressHitIsGenerous(zoom)) return visualRadius + 6
-  return Math.max(4, visualRadius)
-}
-
-/** First pass: union pairs within this distance (m). */
-const ADDRESS_CLUSTER_MERGE_METERS = 12
-/** Second pass: merge whole clusters if any cross-cluster pair is within this (m). Catches wide footprints. */
-const ADDRESS_CLUSTER_CROSS_GAP_METERS = 22
-const APPROVED_LOGIN_EMAILS = (import.meta.env.VITE_ALLOWED_LOGIN_EMAILS ?? '')
-  .split(',')
-  .map((email) => email.trim().toLowerCase())
-  .filter(Boolean)
-const RESET_PASSWORD_QUERY_KEY = 'reset_password'
-const AUTH_REDIRECT_OVERRIDE = import.meta.env.VITE_AUTH_REDIRECT_URL?.trim()
-
-function hasResetPasswordIntentInUrl(): boolean {
-  if (typeof window === 'undefined') return false
-  const url = new URL(window.location.href)
-  if (url.searchParams.get(RESET_PASSWORD_QUERY_KEY) === '1') return true
-  if (url.hash.startsWith('#')) {
-    const hashParams = new URLSearchParams(url.hash.slice(1))
-    if (hashParams.get(RESET_PASSWORD_QUERY_KEY) === '1') return true
-    if (hashParams.get('type') === 'recovery') return true
-    if (hashParams.has('access_token') && hashParams.has('refresh_token')) return true
-  }
-  return window.location.href.includes('type=recovery')
-}
-
-function getAuthRedirectUrl(pathAndQuery: string): string {
-  if (AUTH_REDIRECT_OVERRIDE) {
-    const base = AUTH_REDIRECT_OVERRIDE.endsWith('/')
-      ? AUTH_REDIRECT_OVERRIDE.slice(0, -1)
-      : AUTH_REDIRECT_OVERRIDE
-    const suffix = pathAndQuery.startsWith('/') ? pathAndQuery : `/${pathAndQuery}`
-    return `${base}${suffix}`
-  }
-  const host = window.location.hostname
-  const isLocal = host === 'localhost' || host === '127.0.0.1'
-  if (isLocal) {
-    return `http://localhost:8888${pathAndQuery}`
-  }
-  return `${window.location.origin}${pathAndQuery}`
-}
-
-/** True when signUp failed because this email is already in auth (then we try sign-in). */
-function isEmailAlreadyRegisteredSignupError(message: string): boolean {
-  const m = message.toLowerCase()
-  return (
-    m.includes('already been registered') ||
-    m.includes('already registered') ||
-    m.includes('user already exists') ||
-    m.includes('email address is already')
-  )
-}
-
-function isInvalidPasswordSignInError(message: string): boolean {
-  const m = message.toLowerCase()
-  return m.includes('invalid login credentials') || m.includes('invalid email or password')
-}
-
-function MapViewportWatcher({
-  onViewportChange,
-}: {
-  onViewportChange: (nextViewport: ViewportBounds) => void
-}) {
-  const map = useMapEvents({
-    moveend: () => {
-      const bounds = map.getBounds()
-      onViewportChange({
-        south: bounds.getSouth(),
-        west: bounds.getWest(),
-        north: bounds.getNorth(),
-        east: bounds.getEast(),
-        zoom: map.getZoom(),
-      })
-    },
-    zoomend: () => {
-      const bounds = map.getBounds()
-      onViewportChange({
-        south: bounds.getSouth(),
-        west: bounds.getWest(),
-        north: bounds.getNorth(),
-        east: bounds.getEast(),
-        zoom: map.getZoom(),
-      })
-    },
-  })
-
-  useEffect(() => {
-    const bounds = map.getBounds()
-    onViewportChange({
-      south: bounds.getSouth(),
-      west: bounds.getWest(),
-      north: bounds.getNorth(),
-      east: bounds.getEast(),
-      zoom: map.getZoom(),
-    })
-  }, [map, onViewportChange])
-
-  return null
-}
-
-function MapPaneSetup() {
-  const map = useMap()
-
-  useEffect(() => {
-    const geofencePane = map.getPane('geofencePane') ?? map.createPane('geofencePane')
-    geofencePane.style.zIndex = '350'
-
-    const addressPane = map.getPane('addressPane') ?? map.createPane('addressPane')
-    addressPane.style.zIndex = '450'
-  }, [map])
-
-  return null
-}
-
-function MapStatusLine({
-  dotsEnabled,
-  showAddressDots,
-  hitViewportLimit,
-  role,
-}: {
-  dotsEnabled: boolean
-  showAddressDots: boolean
-  hitViewportLimit: boolean
-  role: string
-}) {
-  let text: string
-  let muted = false
-  if (!dotsEnabled) {
-    text = 'Address dots are hidden. Use "Show dots" to re-enable.'
-  } else if (!showAddressDots) {
-    text =
-      role === 'admin'
-        ? 'Zoom in closer to show address dots'
-        : 'Zoom in to see address dots.'
-  } else if (hitViewportLimit) {
-    text = `Too many points in this view; showing first ${VIEWPORT_LIMIT}. Zoom in for full detail.`
-  } else {
-    text = 'Map ready.'
-    muted = true
-  }
-
-  return (
-    <div className="map-status-line map-status-line--inline" role="status" aria-live="polite">
-      <span className={muted ? 'map-status-text muted' : 'map-status-text'}>{text}</span>
-    </div>
-  )
-}
-
-function GeofenceDrawManager({
-  geofences,
-  enabled,
-  allowGeofenceSelect,
-  assignedGeofenceIdList,
-  selectedGeofenceId,
-  onCreated,
-  onEdited,
-  onDeleted,
-  onSelect,
-}: {
-  geofences: GeofenceRow[]
-  enabled: boolean
-  allowGeofenceSelect: boolean
-  assignedGeofenceIdList: string[]
-  selectedGeofenceId: string
-  onCreated: (geometry: GeoJSON.Polygon) => void
-  onEdited: (updates: Array<{ id: string; geometry: GeoJSON.Polygon }>) => void
-  onDeleted: (ids: string[]) => void | Promise<boolean>
-  onSelect: (id: string) => void
-}) {
-  const map = useMap()
-  const featureGroupRef = useRef<L.FeatureGroup | null>(null)
-  const drawControlRef = useRef<L.Control.Draw | null>(null)
-  /** While drawing/editing/deleting geofences, ignore map background clicks so we do not clear selection. */
-  const blockGeofenceClearOnMapClickRef = useRef(false)
-
-  useEffect(() => {
-    if (!featureGroupRef.current) {
-      featureGroupRef.current = new L.FeatureGroup()
-      map.addLayer(featureGroupRef.current)
-    }
-
-    const group = featureGroupRef.current
-    group.clearLayers()
-    const assignedSet = new Set(assignedGeofenceIdList)
-    geofences.forEach((fence) => {
-      const isMine = assignedSet.has(fence.id)
-      let color: string
-      let weight: number
-      let fillColor: string
-      let fillOpacity: number
-      if (allowGeofenceSelect) {
-        /* Darker violet for contrast on OSM; fill still translucent so roads show through. */
-        color = '#4c1d95'
-        weight = 3
-        fillColor = '#c4b5fd'
-        fillOpacity = 0.34
-      } else if (assignedGeofenceIdList.length > 0) {
-        color = isMine ? '#4c1d95' : '#94a3b8'
-        weight = isMine ? 3 : 1.5
-        fillColor = isMine ? '#c4b5fd' : '#cbd5e1'
-        fillOpacity = isMine ? 0.34 : 0.07
-      } else {
-        color = '#94a3b8'
-        weight = 1.5
-        fillColor = '#cbd5e1'
-        fillOpacity = 0.06
-      }
-      const layer = L.polygon(
-        fence.geometry.coordinates[0].map(([lng, lat]) => [lat, lng] as [number, number]),
-        {
-          pane: 'geofencePane',
-          color,
-          weight,
-          fillColor,
-          fillOpacity,
-        },
-      ) as L.Polygon & { geofenceId?: string }
-      layer.geofenceId = fence.id
-      if (allowGeofenceSelect) {
-        layer.on('click', (e: L.LeafletMouseEvent) => {
-          L.DomEvent.stopPropagation(e)
-          onSelect(fence.id)
-        })
-      }
-      group.addLayer(layer)
-    })
-  }, [map, geofences, onSelect, allowGeofenceSelect, assignedGeofenceIdList])
-
-  useEffect(() => {
-    const block = () => {
-      blockGeofenceClearOnMapClickRef.current = true
-    }
-    const unblock = () => {
-      blockGeofenceClearOnMapClickRef.current = false
-    }
-    map.on(L.Draw.Event.DRAWSTART, block)
-    map.on(L.Draw.Event.DRAWSTOP, unblock)
-    map.on(L.Draw.Event.CREATED, unblock)
-    map.on(L.Draw.Event.EDITSTART, block)
-    map.on(L.Draw.Event.EDITSTOP, unblock)
-    map.on(L.Draw.Event.EDITED, unblock)
-    map.on(L.Draw.Event.DELETESTART, block)
-    map.on(L.Draw.Event.DELETESTOP, unblock)
-    map.on(L.Draw.Event.DELETED, unblock)
-    map.on(L.Draw.Event.TOOLBARCLOSED, unblock)
-    return () => {
-      map.off(L.Draw.Event.DRAWSTART, block)
-      map.off(L.Draw.Event.DRAWSTOP, unblock)
-      map.off(L.Draw.Event.CREATED, unblock)
-      map.off(L.Draw.Event.EDITSTART, block)
-      map.off(L.Draw.Event.EDITSTOP, unblock)
-      map.off(L.Draw.Event.EDITED, unblock)
-      map.off(L.Draw.Event.DELETESTART, block)
-      map.off(L.Draw.Event.DELETESTOP, unblock)
-      map.off(L.Draw.Event.DELETED, unblock)
-      map.off(L.Draw.Event.TOOLBARCLOSED, unblock)
-    }
-  }, [map])
-
-  useEffect(() => {
-    if (!allowGeofenceSelect) {
-      return
-    }
-    const onMapClick = () => {
-      if (blockGeofenceClearOnMapClickRef.current) {
-        return
-      }
-      onSelect('')
-    }
-    map.on('click', onMapClick)
-    return () => {
-      map.off('click', onMapClick)
-    }
-  }, [map, allowGeofenceSelect, onSelect])
-
-  useEffect(() => {
-    if (!featureGroupRef.current) return
-
-    const removeDrawControl = () => {
-      if (drawControlRef.current) {
-        map.removeControl(drawControlRef.current)
-        drawControlRef.current = null
-      }
-    }
-
-    if (!enabled) {
-      removeDrawControl()
-      return removeDrawControl
-    }
-
-    // Rebuild so edit/delete only appear with a selection, and Strict Mode never stacks duplicates.
-    removeDrawControl()
-
-    const showEditToolbar = Boolean(selectedGeofenceId)
-    const group = featureGroupRef.current
-
-    drawControlRef.current = new L.Control.Draw({
-      draw: {
-        polygon: {},
-        rectangle: false,
-        polyline: false,
-        marker: false,
-        circle: false,
-        circlemarker: false,
-      },
-      ...(showEditToolbar
-        ? {
-            edit: {
-              featureGroup: group,
-              edit: {},
-              remove: true,
-            },
-          }
-        : {}),
-    })
-    map.addControl(drawControlRef.current)
-
-    return removeDrawControl
-  }, [map, enabled, selectedGeofenceId])
-
-  useEffect(() => {
-    const handleCreated = (event: L.DrawEvents.Created) => {
-      const layer = event.layer as L.Polygon
-      const geometry = (layer.toGeoJSON() as GeoJSON.Feature<GeoJSON.Polygon>).geometry
-      onCreated(geometry)
-    }
-    const handleEdited = (event: L.DrawEvents.Edited) => {
-      const updates: Array<{ id: string; geometry: GeoJSON.Polygon }> = []
-      event.layers.eachLayer((layer) => {
-        const polygon = layer as L.Polygon & { geofenceId?: string }
-        if (!polygon.geofenceId) return
-        const geometry = (polygon.toGeoJSON() as GeoJSON.Feature<GeoJSON.Polygon>).geometry
-        updates.push({ id: polygon.geofenceId, geometry })
-      })
-      if (updates.length > 0) onEdited(updates)
-    }
-    const handleDeleted = (event: L.DrawEvents.Deleted) => {
-      const ids: string[] = []
-      event.layers.eachLayer((layer) => {
-        const polygon = layer as L.Polygon & { geofenceId?: string }
-        if (polygon.geofenceId) ids.push(polygon.geofenceId)
-      })
-      if (ids.length > 0) onDeleted(ids)
-    }
-
-    map.on(L.Draw.Event.CREATED, handleCreated)
-    map.on(L.Draw.Event.EDITED, handleEdited)
-    map.on(L.Draw.Event.DELETED, handleDeleted)
-    return () => {
-      map.off(L.Draw.Event.CREATED, handleCreated)
-      map.off(L.Draw.Event.EDITED, handleEdited)
-      map.off(L.Draw.Event.DELETED, handleDeleted)
-    }
-  }, [map, onCreated, onEdited, onDeleted])
-
-  return null
-}
-
-function GeofenceTrashIcon() {
-  return (
-    <svg
-      className="geofence-trash-svg"
-      viewBox="0 0 24 24"
-      width="20"
-      height="20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M3 6h18" />
-      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-      <path d="M10 11v6M14 11v6" />
-    </svg>
-  )
-}
-
-function GeofenceMarkCanvassedIcon() {
-  return (
-    <svg
-      className="geofence-mark-canvassed-svg"
-      viewBox="0 0 24 24"
-      width="20"
-      height="20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="9" />
-      <path d="M8 12.5l2.5 2.5L16 9" />
-    </svg>
-  )
-}
-
-function MapHelpInfoIcon() {
-  return (
-    <svg
-      className="map-help-info-svg"
-      viewBox="0 0 24 24"
-      width="20"
-      height="20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 16v-5" />
-      <path d="M12 8h.01" />
-    </svg>
-  )
-}
-
-function PasswordEyeIcon({ visible }: { visible: boolean }) {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-      <path
-        d="M2 12c2.4-4 5.7-6 10-6s7.6 2 10 6c-2.4 4-5.7 6-10 6s-7.6-2-10-6Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle
-        cx="12"
-        cy="12"
-        r="3"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      {!visible ? (
-        <path
-          d="M4 20 20 4"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-        />
-      ) : null}
-    </svg>
-  )
-}
-
-function NearbyAddressSheet({
-  memberIds,
-  addresses,
-  role,
-  geofences,
-  assignedGeofenceIdSet,
-  onClose,
-  onToggle,
-}: {
-  memberIds: string[]
-  addresses: AddressRow[]
-  role: string
-  geofences: GeofenceRow[]
-  assignedGeofenceIdSet: Set<string>
-  onClose: () => void
-  onToggle: (row: AddressRow) => void
-}) {
-  const rows = useMemo(
-    () =>
-      memberIds
-        .map((id) => addresses.find((a) => a.id === id))
-        .filter((a): a is AddressRow => a != null),
-    [memberIds, addresses],
-  )
-  const sheetStreetGroups = useMemo(() => buildStreetGroups(rows), [rows])
-
-  return (
-    <div
-      className="nearby-sheet-backdrop"
-      role="presentation"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose()
-        }
-      }}
-    >
-      <div
-        className="nearby-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="nearby-sheet-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="nearby-sheet-header">
-          <h2 id="nearby-sheet-title">Addresses here</h2>
-          <button type="button" className="nearby-sheet-close" aria-label="Close list" onClick={onClose}>
-            ×
-          </button>
-        </div>
-        <p className="nearby-sheet-subtitle">
-          {rows.length} at this spot, grouped by street. Mark each unit as you go.
-        </p>
-        <div className="nearby-sheet-streets">
-          {sheetStreetGroups.map((group, streetIndex) => (
-            <CollapsibleStreetBlock
-              key={group.sortKey}
-              blockClassName="nearby-sheet-street"
-              defaultOpen={sheetStreetGroups.length <= 4 || streetIndex < 2}
-              summaryClassName="nearby-sheet-street-summary"
-              nameClassName="nearby-sheet-street-name"
-              metaClassName="nearby-sheet-street-meta"
-              heading={group.heading}
-              meta={`${group.rows.filter((a) => a.canvassed).length}/${group.rows.length} done`}
-            >
-              <ul className="nearby-sheet-list">
-                {group.rows.map((address) => {
-                  const canToggle =
-                    role === 'admin' ||
-                    (role === 'canvasser' &&
-                      addressInAssignedGeofences(address, geofences, assignedGeofenceIdSet))
-                  return (
-                    <li key={address.id} className="nearby-sheet-row">
-                      <div className="nearby-sheet-row-text">
-                        <span className="nearby-sheet-address">{address.full_address}</span>
-                        <span className={`nearby-sheet-pill ${address.canvassed ? 'done' : 'todo'}`}>
-                          {address.canvassed ? 'Canvassed' : 'Not canvassed'}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        className="nearby-sheet-action"
-                        disabled={!canToggle}
-                        onClick={() => void onToggle(address)}
-                      >
-                        {role === 'admin'
-                          ? address.canvassed
-                            ? 'Mark uncanvassed'
-                            : 'Mark canvassed'
-                          : canToggle
-                            ? address.canvassed
-                              ? 'Mark uncanvassed'
-                              : 'Mark canvassed'
-                            : 'Outside your areas'}
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            </CollapsibleStreetBlock>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function App() {
-  const [session, setSession] = useState<Session | null>(null)
   const [role, setRole] = useState<string>('')
-  const [authStep, setAuthStep] = useState<'email' | 'email-instructions' | 'password'>('email')
-  const [authEmail, setAuthEmail] = useState('')
-  const [authPasswordIntent, setAuthPasswordIntent] = useState<'sign_in' | 'create_password'>(
-    'create_password',
-  )
-  const [authPassword, setAuthPassword] = useState('')
-  const [authPasswordConfirm, setAuthPasswordConfirm] = useState('')
-  const [authPasswordVisible, setAuthPasswordVisible] = useState(false)
-  const [authPasswordConfirmVisible, setAuthPasswordConfirmVisible] = useState(false)
-  const [resetPasswordDraft, setResetPasswordDraft] = useState('')
-  const [resetPasswordConfirmDraft, setResetPasswordConfirmDraft] = useState('')
-  const [resetPasswordVisible, setResetPasswordVisible] = useState(false)
-  const [resetPasswordConfirmVisible, setResetPasswordConfirmVisible] = useState(false)
-  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false)
-  const [authMessage, setAuthMessage] = useState('')
-  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false)
-  const [isAuthLoading, setIsAuthLoading] = useState(true)
   const [addresses, setAddresses] = useState<AddressRow[]>([])
   const [errorMessage, setErrorMessage] = useState('')
   const [viewport, setViewport] = useState<ViewportBounds | null>(null)
   const [hitViewportLimit, setHitViewportLimit] = useState(false)
-  const [accessRows, setAccessRows] = useState<AccessRow[]>([])
-  const [isProfilesLoading, setIsProfilesLoading] = useState(false)
-  const [isAddingUser, setIsAddingUser] = useState(false)
-  const [addUserModalOpen, setAddUserModalOpen] = useState(false)
-  const [openAccessActionsEmail, setOpenAccessActionsEmail] = useState('')
-  const [accessMessage, setAccessMessage] = useState('')
-  const [newProfileName, setNewProfileName] = useState('')
-  const [newProfileEmail, setNewProfileEmail] = useState('')
-  const [newProfileRole, setNewProfileRole] = useState<'admin' | 'canvasser'>('canvasser')
-  const [editingUserEmail, setEditingUserEmail] = useState('')
-  const [editingUserNameDraft, setEditingUserNameDraft] = useState('')
-  const [editingUserEmailDraft, setEditingUserEmailDraft] = useState('')
-  const [editingUserRoleDraft, setEditingUserRoleDraft] = useState<'admin' | 'canvasser'>('canvasser')
   const [activeAdminView, setActiveAdminView] = useState<'map' | 'access'>('map')
   const [geofences, setGeofences] = useState<GeofenceRow[]>([])
   const [selectedGeofenceId, setSelectedGeofenceId] = useState('')
@@ -1032,6 +118,111 @@ function App() {
   const [canvasserMapHelpOpen, setCanvasserMapHelpOpen] = useState(false)
   const canvasserMapHelpRef = useRef<HTMLDivElement>(null)
   const accessActionsMenuRef = useRef<HTMLDivElement>(null)
+  const handleAuthErrorMessage = useCallback((message: string) => {
+    setErrorMessage(message)
+  }, [])
+  const handleSessionChanged = useCallback((nextSession: unknown) => {
+    setRole('')
+    setAddresses([])
+    setErrorMessage('')
+    void nextSession
+  }, [])
+  const {
+    session,
+    authStep,
+    setAuthStep,
+    authEmail,
+    setAuthEmail,
+    authPasswordIntent,
+    setAuthPasswordIntent,
+    authPassword,
+    setAuthPassword,
+    authPasswordConfirm,
+    setAuthPasswordConfirm,
+    authPasswordVisible,
+    setAuthPasswordVisible,
+    authPasswordConfirmVisible,
+    setAuthPasswordConfirmVisible,
+    resetPasswordDraft,
+    setResetPasswordDraft,
+    resetPasswordConfirmDraft,
+    setResetPasswordConfirmDraft,
+    resetPasswordVisible,
+    setResetPasswordVisible,
+    resetPasswordConfirmVisible,
+    setResetPasswordConfirmVisible,
+    isPasswordRecovery,
+    authMessage,
+    setAuthMessage,
+    isAuthSubmitting,
+    isAuthLoading,
+    continueWithEmail,
+    signInWithPassword,
+    sendPasswordResetEmail,
+    completePasswordRecovery,
+    signOut,
+  } = useAuthFlow({
+    onSetErrorMessage: handleAuthErrorMessage,
+    onSessionChanged: handleSessionChanged,
+  })
+  const {
+    accessRows,
+    isProfilesLoading,
+    isAddingUser,
+    addUserModalOpen,
+    setAddUserModalOpen,
+    openAccessActionsEmail,
+    setOpenAccessActionsEmail,
+    accessMessage,
+    setAccessMessage,
+    newProfileName,
+    setNewProfileName,
+    newProfileEmail,
+    setNewProfileEmail,
+    newProfileRole,
+    setNewProfileRole,
+    editingUserEmail,
+    editingUserNameDraft,
+    setEditingUserNameDraft,
+    editingUserEmailDraft,
+    setEditingUserEmailDraft,
+    editingUserRoleDraft,
+    setEditingUserRoleDraft,
+    upsertProfile,
+    startEditUser,
+    cancelEditUser,
+    saveEditedUser,
+    deleteUserAccess,
+  } = useAccessPanel({ role, session })
+  const setAddressesFromViewport = useCallback((rows: AddressRow[]) => {
+    setAddresses(rows)
+  }, [])
+  const setHitViewportLimitFromViewport = useCallback((next: boolean) => {
+    setHitViewportLimit(next)
+  }, [])
+  const setErrorMessageFromViewport = useCallback((message: string) => {
+    setErrorMessage(message)
+  }, [])
+  useViewportAddresses({
+    sessionUserId: session?.user?.id,
+    role,
+    viewport,
+    onSetAddresses: setAddressesFromViewport,
+    onSetHitViewportLimit: setHitViewportLimitFromViewport,
+    onSetErrorMessage: setErrorMessageFromViewport,
+  })
+  const setGeofencesFromHook = useCallback((rows: GeofenceRow[]) => {
+    setGeofences(rows)
+  }, [])
+  const setGeofenceMessageFromHook = useCallback((message: string) => {
+    setGeofenceMessage(message)
+  }, [])
+  useVisibleGeofences({
+    sessionUserId: session?.user?.id,
+    role,
+    onSetGeofences: setGeofencesFromHook,
+    onSetGeofenceMessage: setGeofenceMessageFromHook,
+  })
   const selectedGeofence = useMemo(
     () => geofences.find((fence) => fence.id === selectedGeofenceId) ?? null,
     [geofences, selectedGeofenceId],
@@ -1204,186 +395,14 @@ function App() {
       ) ?? null,
     [geofenceAssigneeOptions, geofenceEmailDraft],
   )
-  const buildAccessRows = (
-    accessData: {
-      email: string
-      role: 'admin' | 'canvasser'
-      first_name: string | null
-      last_name: string | null
-    }[] | null,
-    profileData: { email: string; role?: 'admin' | 'canvasser' }[] | null,
-  ): AccessRow[] => {
-    const byEmail = new Map<string, AccessRow>()
-    const profiles = profileData ?? []
-    const activeEmails = new Set(profiles.map((row) => row.email.toLowerCase()))
-
-    ;(accessData ?? []).forEach((row) => {
-      byEmail.set(row.email.toLowerCase(), {
-        email: row.email,
-        role: row.role,
-        first_name: row.first_name ?? null,
-        last_name: row.last_name ?? null,
-        status: (activeEmails.has(row.email.toLowerCase()) ? 'active' : 'pending') as
-          | 'active'
-          | 'pending',
-      })
-    })
-
-    return Array.from(byEmail.values()).sort((a, b) => a.email.localeCompare(b.email))
-  }
-
-  type AdminAccessPanelRpcRow = {
-    email: string
-    role: string
-    first_name: string | null
-    last_name: string | null
-    profile_exists: boolean
-  }
-
-  const accessRowsFromAdminPanelRpc = (raw: unknown): AccessRow[] | null => {
-    let list: unknown = raw
-    if (typeof raw === 'string') {
-      try {
-        list = JSON.parse(raw) as unknown
-      } catch {
-        return null
-      }
-    }
-    if (!Array.isArray(list)) return null
-    const rows: AccessRow[] = []
-    for (const item of list) {
-      if (!item || typeof item !== 'object') continue
-      const r = item as AdminAccessPanelRpcRow
-      const role = r.role === 'admin' ? 'admin' : 'canvasser'
-      rows.push({
-        email: r.email,
-        role,
-        first_name: r.first_name ?? null,
-        last_name: r.last_name ?? null,
-        status: r.profile_exists ? 'active' : 'pending',
-      })
-    }
-    return rows.sort((a, b) => a.email.localeCompare(b.email))
-  }
-
-  const refreshAccessList = async () => {
-    if (!supabase || role !== 'admin') {
-      return
-    }
-
-    setIsProfilesLoading(true)
-    setAccessMessage('')
-
-    const { data: panelData, error: panelError } = await supabase.rpc('admin_list_access_panel')
-
-    if (!panelError && panelData !== null && panelData !== undefined) {
-      const fromRpc = accessRowsFromAdminPanelRpc(panelData)
-      if (fromRpc) {
-        setAccessRows(fromRpc)
-        setIsProfilesLoading(false)
-        return
-      }
-    }
-
-    const rpcMissing =
-      panelError &&
-      /could not find|does not exist|schema cache/i.test(panelError.message ?? '')
-
-    if (panelError && !rpcMissing) {
-      setAccessMessage(panelError.message ?? 'Failed to load access.')
-      setIsProfilesLoading(false)
-      return
-    }
-
-    const { data: accessData, error: accessError } = await supabase
-      .from('user_access')
-      .select('email,role,first_name,last_name')
-      .in('role', ['admin', 'canvasser'])
-      .order('email', { ascending: true })
-
-    const { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      .select('email,role')
-      .in('role', ['admin', 'canvasser'])
-
-    if (accessError || profileError) {
-      setAccessMessage(accessError?.message ?? profileError?.message ?? 'Failed to load access.')
-    } else {
-      const rows = buildAccessRows(
-        (accessData as {
-          email: string
-          role: 'admin' | 'canvasser'
-          first_name: string | null
-          last_name: string | null
-        }[] | null) ?? [],
-        (profileData as { email: string; role?: 'admin' | 'canvasser' }[] | null) ?? [],
-      )
-      setAccessRows(rows)
-    }
-    setIsProfilesLoading(false)
-  }
-
   useEffect(() => {
-    const initializeAuth = async () => {
-      if (!supabase) {
-        setErrorMessage(missingSupabaseConfig)
-        setIsAuthLoading(false)
-        return
-      }
-
-      const { data, error } = await supabase.auth.getSession()
-      if (error) {
-        setErrorMessage(error.message)
-      } else {
-        setSession(data.session)
-      }
-      setIsAuthLoading(false)
-    }
-
-    void initializeAuth()
-
-    if (!supabase) {
-      return
-    }
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, currentSession) => {
-      if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && hasResetPasswordIntentInUrl())) {
-        setIsPasswordRecovery(true)
-      } else if (event === 'SIGNED_OUT') {
-        setIsPasswordRecovery(false)
-        setAuthStep('email')
-        setAuthPassword('')
-        setAuthPasswordConfirm('')
-        setAuthPasswordVisible(false)
-        setAuthPasswordConfirmVisible(false)
-        setAuthPasswordIntent('create_password')
-        setAuthMessage('')
-      }
-      setSession(currentSession)
-      setRole('')
-      setAddresses([])
-      setErrorMessage('')
-    })
-
-    return () => {
-      subscription.unsubscribe()
-    }
-  }, [])
-
-  useEffect(() => {
-    if (hasResetPasswordIntentInUrl()) {
-      setIsPasswordRecovery(true)
-    }
-  }, [])
-
-  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- role-driven UI default */
     if (role === 'admin') {
       setDotsEnabled(false)
     } else if (role === 'canvasser') {
       setDotsEnabled(true)
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [role])
 
   useEffect(() => {
@@ -1454,114 +473,6 @@ function App() {
 
     void fetchProfileRole()
   }, [session, isPasswordRecovery])
-
-  useEffect(() => {
-    const fetchAddresses = async () => {
-      if (!supabase || !session?.user || !APP_ROLES.has(role) || !viewport) {
-        return
-      }
-
-      const centerLat = (viewport.south + viewport.north) / 2
-      const centerLng = (viewport.west + viewport.east) / 2
-
-      const { count: bboxCount, error: countError } = await supabase
-        .from('addresses')
-        .select('id', { count: 'exact', head: true })
-        .gte('lat', viewport.south)
-        .lte('lat', viewport.north)
-        .gte('long', viewport.west)
-        .lte('long', viewport.east)
-
-      if (countError) {
-        setErrorMessage(countError.message)
-        setAddresses([])
-        setHitViewportLimit(false)
-        return
-      }
-
-      const matchedCount = bboxCount ?? 0
-
-      const rpcResult = await supabase.rpc('addresses_in_viewport_by_proximity', {
-        south: viewport.south,
-        north: viewport.north,
-        west: viewport.west,
-        east: viewport.east,
-        clat: centerLat,
-        clong: centerLng,
-        row_limit: VIEWPORT_LIMIT,
-      })
-
-      let rows: AddressRow[]
-      if (rpcResult.error) {
-        const { data, error } = await supabase
-          .from('addresses')
-          .select('id,full_address,lat,long,canvassed')
-          .gte('lat', viewport.south)
-          .lte('lat', viewport.north)
-          .gte('long', viewport.west)
-          .lte('long', viewport.east)
-          .limit(VIEWPORT_LIMIT)
-        if (error) {
-          setErrorMessage(error.message)
-          setAddresses([])
-          setHitViewportLimit(false)
-          return
-        }
-        rows = (data as AddressRow[]) ?? []
-      } else {
-        rows = (rpcResult.data as AddressRow[]) ?? []
-      }
-
-      setHitViewportLimit(role === 'admin' && matchedCount > rows.length)
-      setAddresses(rows)
-    }
-
-    const timer = window.setTimeout(() => {
-      void fetchAddresses()
-    }, 220)
-    return () => window.clearTimeout(timer)
-  }, [session, role, viewport])
-
-  useEffect(() => {
-    void refreshAccessList()
-  }, [role, session])
-
-  useEffect(() => {
-    const fetchGeofences = async () => {
-      if (!supabase || !session?.user || !APP_ROLES.has(role)) return
-      const { data: rpcData, error: rpcError } = await supabase.rpc('list_visible_geofences')
-      if (!rpcError && rpcData !== null && rpcData !== undefined) {
-        try {
-          const parsed = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData
-          if (Array.isArray(parsed)) {
-            setGeofences((parsed as GeofenceRpcRow[]).map((row) => ({ ...row })))
-            return
-          }
-        } catch {
-          // Fall through to legacy table read if RPC response is malformed.
-        }
-      }
-
-      const rpcMissing =
-        rpcError &&
-        /could not find|does not exist|schema cache/i.test(rpcError.message ?? '')
-      if (rpcError && !rpcMissing) {
-        setGeofenceMessage(rpcError.message)
-        return
-      }
-
-      const { data, error } = await supabase
-        .from('geofences')
-        .select('id,name,geometry,assigned_email')
-        .order('created_at', { ascending: true })
-      if (error) {
-        setGeofenceMessage(error.message)
-        return
-      }
-      setGeofences((data as GeofenceRow[]) ?? [])
-    }
-    void fetchGeofences()
-  }, [session, role])
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 900px)')
@@ -1690,15 +601,18 @@ function App() {
   }, [role, assignedGeofenceIdList, geofences])
 
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- selected geofence controls local draft state */
     if (!selectedGeofence) {
       setGeofenceProgress(null)
       return
     }
     setGeofenceNameDraft(selectedGeofence.name)
     setGeofenceEmailDraft(selectedGeofence.assigned_email ?? '')
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [selectedGeofenceId, selectedGeofence?.name, selectedGeofence?.assigned_email])
 
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- geofence progress lifecycle controls */
     if (!selectedGeofenceId || !supabase) {
       setGeofenceProgress(null)
       setIsGeofenceProgressLoading(false)
@@ -1747,13 +661,16 @@ function App() {
     return () => {
       cancelled = true
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [selectedGeofenceId, geofences, supabase])
 
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- reset panel/dialog state when fence changes */
     setMarkAllCompleteDialogOpen(false)
     setGeofencePanelMenuOpen(false)
     setAssigneePickerOpen(false)
     setGeofenceMessage('')
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [selectedGeofenceId])
 
   useEffect(() => {
@@ -2080,391 +997,6 @@ function App() {
     } finally {
       setIsMarkingAllComplete(false)
     }
-  }
-
-  const canAttemptEmailAuth = async (normalizedEmail: string): Promise<boolean> => {
-    if (APPROVED_LOGIN_EMAILS.length > 0 && !APPROVED_LOGIN_EMAILS.includes(normalizedEmail)) return false
-    const { data: hasAccess, error: allowError } = await supabase.rpc('can_request_magic_link', {
-      target_email: normalizedEmail,
-    })
-    if (allowError) return false
-    if (!hasAccess) return false
-    return true
-  }
-
-  const signInWithPassword = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-
-    if (!supabase) {
-      setErrorMessage(missingSupabaseConfig)
-      return
-    }
-
-    const normalizedEmail = authEmail.trim().toLowerCase()
-    const password = authPassword
-    if (!normalizedEmail) {
-      setAuthMessage('Enter your email address.')
-      return
-    }
-    if (!password) {
-      setAuthMessage('Enter your password.')
-      return
-    }
-    if (authPasswordIntent === 'create_password') {
-      if (password.length < 8) {
-        setAuthMessage('Password must be at least 8 characters.')
-        return
-      }
-      if (!authPasswordConfirm) {
-        setAuthMessage('Confirm your new password.')
-        return
-      }
-      if (password !== authPasswordConfirm) {
-        setAuthMessage('Passwords do not match.')
-        return
-      }
-    }
-    setIsAuthSubmitting(true)
-    setAuthMessage('')
-
-    const signUpOpts = {
-      email: normalizedEmail,
-      password,
-      options: { emailRedirectTo: getAuthRedirectUrl('/') },
-    }
-
-    if (authPasswordIntent === 'sign_in') {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      })
-      if (!signInError) {
-        setIsAuthSubmitting(false)
-        return
-      }
-      if (signInError.message.toLowerCase().includes('email not confirmed')) {
-        setIsAuthSubmitting(false)
-        setAuthMessage(
-          'Confirm the link in your email first, then sign in here with the same password.',
-        )
-        return
-      }
-      if (isInvalidPasswordSignInError(signInError.message)) {
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp(signUpOpts)
-        if (!signUpError) {
-          setIsAuthSubmitting(false)
-          if (signUpData.session) {
-            return
-          }
-          setAuthMessage(
-            'Account created. Check your email to confirm, then sign in here with the same password.',
-          )
-          return
-        }
-      }
-      setIsAuthSubmitting(false)
-      setAuthMessage(
-        isInvalidPasswordSignInError(signInError.message)
-          ? 'Invalid email or password.'
-          : (signInError.message ?? 'Could not sign in.'),
-      )
-      return
-    }
-
-    const { data: signUpData, error: signUpError } = await supabase.auth.signUp(signUpOpts)
-
-    if (!signUpError) {
-      setIsAuthSubmitting(false)
-      if (signUpData.session) {
-        return
-      }
-      setAuthMessage(
-        'Account created. Check your email to confirm, then sign in here with the same password.',
-      )
-      return
-    }
-
-    if (isEmailAlreadyRegisteredSignupError(signUpError.message)) {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      })
-      setIsAuthSubmitting(false)
-      if (signInError) {
-        setAuthMessage(
-          'This email already has an account. Use Forgot password to reset it, or enter the password you used before.',
-        )
-        return
-      }
-      return
-    }
-
-    setIsAuthSubmitting(false)
-    setAuthMessage(signUpError.message || 'Could not create account.')
-  }
-
-  const continueWithEmail = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-
-    if (!supabase) {
-      setErrorMessage(missingSupabaseConfig)
-      return
-    }
-
-    const normalizedEmail = authEmail.trim().toLowerCase()
-    if (!normalizedEmail) {
-      setAuthMessage('Enter your email address.')
-      return
-    }
-    setIsAuthSubmitting(true)
-    setAuthMessage('')
-    const canAttempt = await canAttemptEmailAuth(normalizedEmail)
-    if (!canAttempt) {
-      setIsAuthSubmitting(false)
-      setAuthEmail(normalizedEmail)
-      setAuthPassword('')
-      setAuthPasswordConfirm('')
-      setAuthPasswordVisible(false)
-      setAuthPasswordConfirmVisible(false)
-      setAuthStep('email-instructions')
-      return
-    }
-
-    const { data: intentRaw, error: intentError } = await supabase.rpc('access_email_auth_intent', {
-      target_email: normalizedEmail,
-    })
-    const intent =
-      typeof intentRaw === 'string' ? intentRaw.trim() : String(intentRaw ?? '').trim()
-    const nextIntent: 'sign_in' | 'create_password' =
-      !intentError && intent === 'sign_in' ? 'sign_in' : 'create_password'
-
-    setAuthEmail(normalizedEmail)
-    setAuthPassword('')
-    setAuthPasswordConfirm('')
-    setAuthPasswordVisible(false)
-    setAuthPasswordConfirmVisible(false)
-    setAuthPasswordIntent(nextIntent)
-    setAuthStep('password')
-    setIsAuthSubmitting(false)
-  }
-
-  const sendPasswordResetEmail = async () => {
-    if (!supabase) {
-      setErrorMessage(missingSupabaseConfig)
-      return
-    }
-
-    const normalizedEmail = authEmail.trim().toLowerCase()
-    if (!normalizedEmail) {
-      setAuthMessage('Enter your email address to reset your password.')
-      return
-    }
-
-    setIsAuthSubmitting(true)
-    setAuthMessage('')
-    const redirectTo = getAuthRedirectUrl(`/?${RESET_PASSWORD_QUERY_KEY}=1`)
-    const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, { redirectTo })
-    setIsAuthSubmitting(false)
-
-    if (error) {
-      setAuthMessage('Could not send reset instructions right now. Please try again.')
-      return
-    }
-    setAuthMessage('If this email is registered, check your inbox for the next step.')
-  }
-
-  const completePasswordRecovery = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!supabase) {
-      setErrorMessage(missingSupabaseConfig)
-      return
-    }
-    const password = resetPasswordDraft
-    const confirmPassword = resetPasswordConfirmDraft
-    if (!password) {
-      setAuthMessage('Enter a new password.')
-      return
-    }
-    if (password.length < 8) {
-      setAuthMessage('Password must be at least 8 characters.')
-      return
-    }
-    if (password !== confirmPassword) {
-      setAuthMessage('Passwords do not match.')
-      return
-    }
-
-    setIsAuthSubmitting(true)
-    setAuthMessage('')
-    const { error } = await supabase.auth.updateUser({ password })
-    setIsAuthSubmitting(false)
-    if (error) {
-      setAuthMessage(error.message)
-      return
-    }
-
-    await supabase.auth.signOut()
-    setIsPasswordRecovery(false)
-    if (typeof window !== 'undefined') {
-      const url = new URL(window.location.href)
-      url.searchParams.delete(RESET_PASSWORD_QUERY_KEY)
-      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
-    }
-    setResetPasswordDraft('')
-    setResetPasswordConfirmDraft('')
-    setResetPasswordVisible(false)
-    setResetPasswordConfirmVisible(false)
-    setAuthPassword('')
-    setAuthPasswordConfirm('')
-    setAuthPasswordVisible(false)
-    setAuthPasswordConfirmVisible(false)
-    setAuthPasswordIntent('create_password')
-    setAuthStep('email')
-    setAuthMessage('Password updated. Sign in with your new password.')
-  }
-
-  const signOut = async () => {
-    if (!supabase) {
-      return
-    }
-    setAuthStep('email')
-    setAuthPassword('')
-    setAuthPasswordConfirm('')
-    setAuthPasswordVisible(false)
-    setAuthPasswordConfirmVisible(false)
-    setAuthPasswordIntent('create_password')
-    setAuthMessage('')
-    await supabase.auth.signOut()
-  }
-
-  const upsertProfile = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!supabase || role !== 'admin') {
-      return
-    }
-
-    const email = newProfileEmail.trim().toLowerCase()
-    const { firstName, lastName } = splitFullName(newProfileName)
-    if (!firstName) {
-      setAccessMessage('Name is required.')
-      return
-    }
-    if (!email) {
-      setAccessMessage('Email is required.')
-      return
-    }
-
-    setIsAddingUser(true)
-    const { error } = await supabase.rpc('admin_set_user_access', {
-      target_email: email,
-      target_role: newProfileRole,
-      target_first_name: firstName,
-      target_last_name: lastName,
-    })
-    setIsAddingUser(false)
-
-    if (error) {
-      setAccessMessage(error.message)
-      return
-    }
-
-    setAccessMessage(
-      'Access saved. They can open the app, enter this email, and choose a password (first time) or sign in.',
-    )
-    setNewProfileName('')
-    setNewProfileEmail('')
-    setNewProfileRole('canvasser')
-    setAddUserModalOpen(false)
-
-    await refreshAccessList()
-  }
-
-  const startEditUser = (entry: AccessRow) => {
-    setEditingUserEmail(entry.email)
-    setEditingUserNameDraft(accessDisplayName(entry))
-    setEditingUserEmailDraft(entry.email)
-    setEditingUserRoleDraft(entry.role)
-    setOpenAccessActionsEmail('')
-    setAccessMessage('')
-  }
-
-  const cancelEditUser = () => {
-    setEditingUserEmail('')
-    setEditingUserNameDraft('')
-    setEditingUserEmailDraft('')
-    setEditingUserRoleDraft('canvasser')
-  }
-
-  const saveEditedUser = async (currentEmail: string) => {
-    if (!supabase || role !== 'admin') {
-      return
-    }
-
-    const nextEmail = editingUserEmailDraft.trim().toLowerCase()
-    const { firstName, lastName } = splitFullName(editingUserNameDraft)
-    if (!firstName) {
-      setAccessMessage('Name is required.')
-      return
-    }
-    if (!nextEmail) {
-      setAccessMessage('Email is required.')
-      return
-    }
-
-    if (nextEmail !== currentEmail.toLowerCase()) {
-      const { error } = await supabase.rpc('admin_update_user_email', {
-        old_email: currentEmail.toLowerCase(),
-        new_email: nextEmail,
-      })
-      if (error) {
-        setAccessMessage(error.message)
-        return
-      }
-    }
-
-    const { error } = await supabase.rpc('admin_set_user_access', {
-      target_email: nextEmail,
-      target_role: editingUserRoleDraft,
-      target_first_name: firstName,
-      target_last_name: lastName,
-    })
-    if (error) {
-      setAccessMessage(error.message)
-      return
-    }
-
-    setAccessMessage('User updated.')
-    cancelEditUser()
-    await refreshAccessList()
-  }
-
-  const deleteUserAccess = async (targetEmail: string) => {
-    if (!supabase || role !== 'admin') {
-      return
-    }
-
-    const confirmed = window.confirm(`Delete ${targetEmail} from app access?`)
-    if (!confirmed) {
-      return
-    }
-
-    const { error } = await supabase.rpc('admin_delete_user_access', {
-      target_email: targetEmail.toLowerCase(),
-    })
-
-    if (error) {
-      setAccessMessage(error.message)
-      return
-    }
-
-    setAccessMessage('User access removed.')
-    setAccessRows((current) =>
-      current.filter((entry) => entry.email.toLowerCase() !== targetEmail.toLowerCase()),
-    )
-    if (editingUserEmail.toLowerCase() === targetEmail.toLowerCase()) {
-      cancelEditUser()
-    }
-    await refreshAccessList()
   }
 
   const handleGeofenceCreated = async (geometry: GeoJSON.Polygon) => {

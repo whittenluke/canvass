@@ -2,18 +2,37 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 const projectRoot = process.cwd()
-const appFile = path.join(projectRoot, 'src', 'App.tsx')
+const srcDir = path.join(projectRoot, 'src')
 const migrationsDir = path.join(projectRoot, 'supabase', 'migrations')
 
 const RPC_CALL_RE = /\.rpc\(\s*['"]([a-zA-Z0-9_]+)['"]/g
 const SQL_FN_RE = /create\s+(?:or\s+replace\s+)?function\s+public\.([a-zA-Z0-9_]+)/gi
 
-const readRpcCallsFromApp = async () => {
-  const source = await fs.readFile(appFile, 'utf8')
+const collectSourceFiles = async (dir) => {
+  const entries = await fs.readdir(dir, { withFileTypes: true })
+  const files = []
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      files.push(...(await collectSourceFiles(fullPath)))
+      continue
+    }
+    if (entry.isFile() && (fullPath.endsWith('.ts') || fullPath.endsWith('.tsx'))) {
+      files.push(fullPath)
+    }
+  }
+  return files
+}
+
+const readRpcCallsFromSource = async () => {
+  const sourceFiles = await collectSourceFiles(srcDir)
   const names = new Set()
-  let match
-  while ((match = RPC_CALL_RE.exec(source)) !== null) {
-    names.add(match[1])
+  for (const file of sourceFiles) {
+    const source = await fs.readFile(file, 'utf8')
+    let match
+    while ((match = RPC_CALL_RE.exec(source)) !== null) {
+      names.add(match[1])
+    }
   }
   return names
 }
@@ -38,7 +57,7 @@ const readDefinedSqlFunctions = async () => {
 const toSortedArray = (values) => [...values].sort((a, b) => a.localeCompare(b))
 
 const main = async () => {
-  const rpcCalls = await readRpcCallsFromApp()
+  const rpcCalls = await readRpcCallsFromSource()
   const migrationFunctions = await readDefinedSqlFunctions()
 
   const missingInMigrations = toSortedArray(
@@ -48,7 +67,7 @@ const main = async () => {
     new Set([...migrationFunctions].filter((name) => !rpcCalls.has(name))),
   )
 
-  console.log(`RPC calls in src/App.tsx: ${rpcCalls.size}`)
+  console.log(`RPC calls in src/**/*.ts(x): ${rpcCalls.size}`)
   console.log(`Functions defined in supabase/migrations: ${migrationFunctions.size}`)
   console.log('')
 
@@ -57,12 +76,12 @@ const main = async () => {
     for (const fn of missingInMigrations) console.log(`- ${fn}`)
     console.log('')
   } else {
-    console.log('No missing RPC functions. Migration coverage is complete for App.tsx.')
+    console.log('No missing RPC functions. Migration coverage is complete for src/**/*.ts(x).')
     console.log('')
   }
 
   if (unusedInApp.length > 0) {
-    console.log('Defined in migrations but not called by App.tsx:')
+    console.log('Defined in migrations but not called by src/**/*.ts(x):')
     for (const fn of unusedInApp) console.log(`- ${fn}`)
     console.log('')
   }
