@@ -609,7 +609,7 @@ function App() {
     setGeofenceNameDraft(selectedGeofence.name)
     setGeofenceEmailDraft(selectedGeofence.assigned_email ?? '')
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [selectedGeofenceId, selectedGeofence?.name, selectedGeofence?.assigned_email])
+  }, [selectedGeofenceId, selectedGeofence])
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- geofence progress lifecycle controls */
@@ -662,7 +662,7 @@ function App() {
       cancelled = true
     }
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [selectedGeofenceId, geofences, supabase])
+  }, [selectedGeofenceId, geofences])
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- reset panel/dialog state when fence changes */
@@ -761,7 +761,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [addUserModalOpen, isAddingUser])
+  }, [addUserModalOpen, isAddingUser, setAddUserModalOpen])
 
   useEffect(() => {
     if (!openAccessActionsEmail) return
@@ -782,7 +782,7 @@ function App() {
       document.removeEventListener('mousedown', onDocMouseDown)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [openAccessActionsEmail])
+  }, [openAccessActionsEmail, setOpenAccessActionsEmail])
 
   useEffect(() => {
     if (!mapRef.current) return

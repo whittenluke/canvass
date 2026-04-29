@@ -75,7 +75,7 @@ export function MapStatusLine({
   let text: string
   let muted = false
   if (!dotsEnabled) {
-    text = 'Address dots are hidden. Use "Show dots" to re-enable.'
+    text = 'Click the dot icon to enable address dots.'
   } else if (!showAddressDots) {
     text = role === 'admin' ? 'Zoom in closer to show address dots' : 'Zoom in to see address dots.'
   } else if (hitViewportLimit) {
