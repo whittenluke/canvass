@@ -578,8 +578,10 @@
 .map-help-anchor {
   position: absolute;
   z-index: 1000;
-  top: 12px;
-  left: 12px;
+  /* Below full Leaflet +/- column (+ margin) so the 36px tip button clears the − control too */
+  top: calc(env(safe-area-inset-top, 0px) + 84px);
+  /* Match Leaflet .leaflet-left .leaflet-control margin-left (10px) + safe area */
+  left: calc(10px + env(safe-area-inset-left, 0px));
   max-width: min(calc(100% - 56px), 320px);
 }
 
@@ -2201,12 +2203,6 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
   .map-panel {
     grid-column: 1;
     grid-row: 1;
-  }
-
-  /* Leaflet +/- zoom is top-left; keep help below it so zoom stays tappable */
-  .map-help-anchor {
-    top: calc(env(safe-area-inset-top, 0px) + 76px);
-    left: max(10px, env(safe-area-inset-left, 0px));
   }
 
   .geofence-panel {

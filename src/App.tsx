@@ -157,6 +157,10 @@ function App() {
   const [canvasserMapHelpOpen, setCanvasserMapHelpOpen] = useState(false)
   const canvasserMapHelpRef = useRef<HTMLDivElement>(null)
   const canvasserAreasPanelRef = useRef<HTMLElement | null>(null)
+  /** Last canvasser framing scope (assignments + focus). Used to restore saved viewport only on remount, not when focus/assignments change. */
+  const canvasserMapViewportFrameKeyRef = useRef<string | null>(null)
+  /** Block persisting viewport until fit/restore has run (avoids clobbering sessionStorage with default center/zoom before restore). */
+  const canvasserAllowViewportPersistRef = useRef(false)
   const accessActionsMenuRef = useRef<HTMLDivElement>(null)
   const handleAuthErrorMessage = useCallback((message: string) => {
     setErrorMessage(message)
@@ -285,7 +289,7 @@ function App() {
     const id = canvasserFocusedGeofenceId
     if (!id || !assignedGeofenceIdSet.has(id)) return ''
     return id
-  }, [role, assignedGeofenceIdList.length, assignedGeofenceIdSet, canvasserFocusedGeofenceId])
+  }, [role, assignedGeofenceIdList, assignedGeofenceIdSet, canvasserFocusedGeofenceId])
   const canvasserAreasTitle = useMemo(() => {
     const n = assignedGeofenceIdList.length
     if (n === 0) return 'Assigned areas'
@@ -488,6 +492,7 @@ function App() {
     (next: ViewportBounds) => {
       if (role !== 'canvasser') return
       if (canvasserUiView !== 'map') return
+      if (!canvasserAllowViewportPersistRef.current) return
       if (!canvasserAssignedFenceIdsKey) return
       const emailNorm = sessionEmail || '(no-email)'
       const storageKey = canvasserViewportSessionStorageKey(
@@ -961,6 +966,10 @@ function App() {
 
   useEffect(() => {
     if (role !== 'canvasser' || canvasserUiView !== 'map') {
+      canvasserAllowViewportPersistRef.current = false
+      if (role !== 'canvasser') {
+        canvasserMapViewportFrameKeyRef.current = null
+      }
       return
     }
     if (assignedGeofenceIdList.length === 0) {
@@ -994,12 +1003,20 @@ function App() {
       return
     }
 
+    const framingScopeKey = `${canvasserAssignedFenceIdsKey}|${canvasserEffectiveFocusGeofenceId}`
+    const prevFramingScope = canvasserMapViewportFrameKeyRef.current
+    const shouldTryRestoreSavedViewport =
+      prevFramingScope !== null && prevFramingScope === framingScopeKey
+    canvasserMapViewportFrameKeyRef.current = framingScopeKey
+
     const emailNorm = sessionEmail || '(no-email)'
     const storageKey = canvasserViewportSessionStorageKey(
       emailNorm,
       canvasserAssignedFenceIdsKey,
       canvasserEffectiveFocusGeofenceId,
     )
+
+    canvasserAllowViewportPersistRef.current = false
 
     const runFitBounds = () => {
       const pad = 34
@@ -1031,14 +1048,26 @@ function App() {
       return true
     }
 
-    // Wait one frame after map/tab mount so Leaflet has final dimensions; restore prior pan/zoom
-    // when returning from sleep or list tab instead of always resetting with fitBounds.
+    // Wait one frame after map/tab mount so Leaflet has final dimensions.
+    // Restore only when assignments + focus match last map session (e.g. list tab or wake); otherwise fitBounds (focus tap, new assignments).
+    let persistUnlockRaf = 0
     const raf = window.requestAnimationFrame(() => {
-      if (!tryRestoreSavedViewport()) {
+      let restored = false
+      if (shouldTryRestoreSavedViewport) {
+        restored = tryRestoreSavedViewport()
+      }
+      if (!restored) {
         runFitBounds()
       }
+      persistUnlockRaf = window.requestAnimationFrame(() => {
+        canvasserAllowViewportPersistRef.current = true
+      })
     })
-    return () => window.cancelAnimationFrame(raf)
+    return () => {
+      window.cancelAnimationFrame(raf)
+      window.cancelAnimationFrame(persistUnlockRaf)
+      canvasserAllowViewportPersistRef.current = false
+    }
   }, [
     role,
     canvasserUiView,
@@ -2236,7 +2265,7 @@ function App() {
                       {canvasserAreasPanelExpanded ? '▲' : '▼'}
                     </span>
                   </div>
-                ) : canvasserDisplayProgress ? (
+                ) : canvasserListProgress !== null ? (
                   <>
                     <div className="canvasser-areas-strip-row">
                       <span className="canvasser-areas-strip-title">
@@ -2245,9 +2274,10 @@ function App() {
                       <span className="canvasser-areas-strip-meta">
                         <span className="canvasser-progress-inline">
                           <span>
-                            {canvasserDisplayProgress.done}/{canvasserDisplayProgress.total}
+                            {canvasserDrawerOverallProgress.done}/
+                            {canvasserDrawerOverallProgress.total}
                           </span>
-                          <span>{canvasserDisplayProgress.percent}%</span>
+                          <span>{canvasserDrawerOverallProgress.percent}%</span>
                         </span>
                       </span>
                       <span className="canvasser-areas-strip-chevron" aria-hidden="true">
@@ -2257,7 +2287,7 @@ function App() {
                     <div className="canvasser-areas-strip-bar" aria-hidden="true">
                       <div
                         className="canvasser-areas-strip-bar-fill"
-                        style={{ width: `${canvasserDisplayProgress.percent}%` }}
+                        style={{ width: `${canvasserDrawerOverallProgress.percent}%` }}
                       />
                     </div>
                   </>
