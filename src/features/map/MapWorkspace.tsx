@@ -151,7 +151,7 @@ export function GeofenceDrawManager({
           fillColor = '#c4b5fd'
           fillOpacity = isFocusedLayer ? 0.42 : 0.34
         } else {
-          // Other assigned zones: same purple family as focus, lighter so focus still pops
+          // Other assigned areas: same purple family as focus, lighter so focus still pops
           color = '#7c3aed'
           weight = 2.5
           fillColor = '#ddd6fe'

@@ -1517,7 +1517,7 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
   margin-top: 0.35rem;
 }
 
-.canvasser-show-all-zones-btn {
+.canvasser-show-all-areas-btn {
   border: 0;
   padding: 0.35rem 0.65rem;
   border-radius: 8px;
@@ -1528,11 +1528,11 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
   color: #5b21b6;
 }
 
-.canvasser-show-all-zones-btn:hover {
+.canvasser-show-all-areas-btn:hover {
   background: #ddd6fe;
 }
 
-.canvasser-show-all-zones-btn:focus-visible {
+.canvasser-show-all-areas-btn:focus-visible {
   outline: 2px solid #7c3aed;
   outline-offset: 2px;
 }
