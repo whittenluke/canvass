@@ -157,8 +157,6 @@ function App() {
   const [canvasserMapHelpOpen, setCanvasserMapHelpOpen] = useState(false)
   const canvasserMapHelpRef = useRef<HTMLDivElement>(null)
   const canvasserAreasPanelRef = useRef<HTMLElement | null>(null)
-  /** Last canvasser framing scope (assignments + focus). Used to restore saved viewport only on remount, not when focus/assignments change. */
-  const canvasserMapViewportFrameKeyRef = useRef<string | null>(null)
   /** Block persisting viewport until fit/restore has run (avoids clobbering sessionStorage with default center/zoom before restore). */
   const canvasserAllowViewportPersistRef = useRef(false)
   const accessActionsMenuRef = useRef<HTMLDivElement>(null)
@@ -526,6 +524,34 @@ function App() {
     },
     [persistCanvasserMapViewport],
   )
+
+  // Persist immediately when the tab goes hidden — reduces races where sleep locks before Leaflet emits moveend.
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    if (role !== 'canvasser' || canvasserUiView !== 'map') return
+
+    const flushIfGoingAway = () => {
+      if (document.visibilityState !== 'hidden') return
+      const map = mapRef.current
+      if (!map || !canvasserAllowViewportPersistRef.current) return
+      const b = map.getBounds()
+      persistCanvasserMapViewport({
+        south: b.getSouth(),
+        west: b.getWest(),
+        north: b.getNorth(),
+        east: b.getEast(),
+        zoom: map.getZoom(),
+      })
+    }
+
+    document.addEventListener('visibilitychange', flushIfGoingAway)
+    window.addEventListener('pagehide', flushIfGoingAway)
+    return () => {
+      document.removeEventListener('visibilitychange', flushIfGoingAway)
+      window.removeEventListener('pagehide', flushIfGoingAway)
+    }
+  }, [role, canvasserUiView, persistCanvasserMapViewport])
+
   const adminCount = useMemo(
     () => accessRows.filter((entry) => entry.role === 'admin').length,
     [accessRows],
@@ -967,9 +993,6 @@ function App() {
   useEffect(() => {
     if (role !== 'canvasser' || canvasserUiView !== 'map') {
       canvasserAllowViewportPersistRef.current = false
-      if (role !== 'canvasser') {
-        canvasserMapViewportFrameKeyRef.current = null
-      }
       return
     }
     if (assignedGeofenceIdList.length === 0) {
@@ -1002,12 +1025,6 @@ function App() {
     if (!bounds.isValid()) {
       return
     }
-
-    const framingScopeKey = `${canvasserAssignedFenceIdsKey}|${canvasserEffectiveFocusGeofenceId}`
-    const prevFramingScope = canvasserMapViewportFrameKeyRef.current
-    const shouldTryRestoreSavedViewport =
-      prevFramingScope !== null && prevFramingScope === framingScopeKey
-    canvasserMapViewportFrameKeyRef.current = framingScopeKey
 
     const emailNorm = sessionEmail || '(no-email)'
     const storageKey = canvasserViewportSessionStorageKey(
@@ -1049,13 +1066,10 @@ function App() {
     }
 
     // Wait one frame after map/tab mount so Leaflet has final dimensions.
-    // Restore only when assignments + focus match last map session (e.g. list tab or wake); otherwise fitBounds (focus tap, new assignments).
+    // Prefer sessionStorage (survives reload / tab revive); key includes assignments + focus, so a new scope falls through to fitBounds.
     let persistUnlockRaf = 0
     const raf = window.requestAnimationFrame(() => {
-      let restored = false
-      if (shouldTryRestoreSavedViewport) {
-        restored = tryRestoreSavedViewport()
-      }
+      const restored = tryRestoreSavedViewport()
       if (!restored) {
         runFitBounds()
       }
