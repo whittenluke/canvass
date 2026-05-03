@@ -98,6 +98,7 @@ export function GeofenceDrawManager({
   allowGeofenceSelect,
   assignedGeofenceIdList,
   selectedGeofenceId,
+  canvasserFocusedGeofenceId = '',
   onCreated,
   onEdited,
   onDeleted,
@@ -108,6 +109,7 @@ export function GeofenceDrawManager({
   allowGeofenceSelect: boolean
   assignedGeofenceIdList: string[]
   selectedGeofenceId: string
+  canvasserFocusedGeofenceId?: string
   onCreated: (geometry: GeoJSON.Polygon) => void
   onEdited: (updates: Array<{ id: string; geometry: GeoJSON.Polygon }>) => void
   onDeleted: (ids: string[]) => void | Promise<boolean>
@@ -127,17 +129,34 @@ export function GeofenceDrawManager({
     const group = featureGroupRef.current
     group.clearLayers()
     const assignedSet = new Set(assignedGeofenceIdList)
+    const canvasserPolygonPickMode = allowGeofenceSelect && !enabled
     geofences.forEach((fence) => {
       const isMine = assignedSet.has(fence.id)
       let color: string
       let weight: number
       let fillColor: string
       let fillOpacity: number
-      if (allowGeofenceSelect) {
+      if (allowGeofenceSelect && enabled) {
         color = '#4c1d95'
         weight = 3
         fillColor = '#c4b5fd'
         fillOpacity = 0.34
+      } else if (canvasserPolygonPickMode && isMine) {
+        const focused = canvasserFocusedGeofenceId
+        const isFocusedLayer = Boolean(focused && fence.id === focused)
+        const showBright = !focused || isFocusedLayer
+        if (showBright) {
+          color = '#4c1d95'
+          weight = isFocusedLayer ? 4 : 3
+          fillColor = '#c4b5fd'
+          fillOpacity = isFocusedLayer ? 0.42 : 0.34
+        } else {
+          // Other assigned zones: same purple family as focus, lighter so focus still pops
+          color = '#7c3aed'
+          weight = 2.5
+          fillColor = '#ddd6fe'
+          fillOpacity = 0.32
+        }
       } else if (assignedGeofenceIdList.length > 0) {
         color = isMine ? '#4c1d95' : '#94a3b8'
         weight = isMine ? 3 : 1.5
@@ -165,7 +184,15 @@ export function GeofenceDrawManager({
       }
       group.addLayer(layer)
     })
-  }, [map, geofences, onSelect, allowGeofenceSelect, assignedGeofenceIdList])
+  }, [
+    map,
+    geofences,
+    onSelect,
+    allowGeofenceSelect,
+    assignedGeofenceIdList,
+    enabled,
+    canvasserFocusedGeofenceId,
+  ])
 
   useEffect(() => {
     const block = () => {

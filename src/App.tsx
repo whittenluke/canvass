@@ -115,8 +115,14 @@ function App() {
     if (typeof window === 'undefined') return true
     return window.matchMedia('(min-width: 901px)').matches
   })
+  const [canvasserAreasPanelExpanded, setCanvasserAreasPanelExpanded] = useState(() => {
+    if (typeof window === 'undefined') return true
+    return window.matchMedia('(min-width: 901px)').matches
+  })
+  const [canvasserFocusedGeofenceId, setCanvasserFocusedGeofenceId] = useState('')
   const [canvasserMapHelpOpen, setCanvasserMapHelpOpen] = useState(false)
   const canvasserMapHelpRef = useRef<HTMLDivElement>(null)
+  const canvasserAreasPanelRef = useRef<HTMLElement | null>(null)
   const accessActionsMenuRef = useRef<HTMLDivElement>(null)
   const handleAuthErrorMessage = useCallback((message: string) => {
     setErrorMessage(message)
@@ -239,19 +245,23 @@ function App() {
     () => new Set(assignedGeofenceIdList),
     [assignedGeofenceIdList],
   )
-  const assignedGeofenceNames = useMemo(
-    () =>
-      geofences
-        .filter((g) => assignedGeofenceIdSet.has(g.id))
-        .map((g) => g.name.trim())
-        .filter((name) => name.length > 0),
-    [geofences, assignedGeofenceIdSet],
-  )
+  const canvasserEffectiveFocusGeofenceId = useMemo(() => {
+    if (role !== 'canvasser') return ''
+    if (assignedGeofenceIdList.length <= 1) return ''
+    const id = canvasserFocusedGeofenceId
+    if (!id || !assignedGeofenceIdSet.has(id)) return ''
+    return id
+  }, [role, assignedGeofenceIdList.length, assignedGeofenceIdSet, canvasserFocusedGeofenceId])
   const canvasserAreasTitle = useMemo(() => {
-    if (assignedGeofenceNames.length === 0) return 'Assigned areas'
-    if (assignedGeofenceNames.length === 1) return assignedGeofenceNames[0]!
-    return `${assignedGeofenceNames[0]} +${assignedGeofenceNames.length - 1}`
-  }, [assignedGeofenceNames])
+    const n = assignedGeofenceIdList.length
+    if (n === 0) return 'Assigned areas'
+    if (n === 1) {
+      const fence = geofences.find((g) => g.id === assignedGeofenceIdList[0])
+      const name = fence?.name.trim()
+      return name ? name : 'Unnamed area'
+    }
+    return `${n} zones assigned`
+  }, [assignedGeofenceIdList, geofences])
   const geofencesForMap = useMemo(() => {
     if (role !== 'canvasser') return geofences
     return geofences.filter((g) => assignedGeofenceIdSet.has(g.id))
@@ -312,6 +322,15 @@ function App() {
     if (assignedGeofenceIdList.length === 0) {
       return []
     }
+    if (assignedGeofenceIdList.length > 1 && canvasserEffectiveFocusGeofenceId) {
+      const fence = geofences.find((g) => g.id === canvasserEffectiveFocusGeofenceId)
+      if (!fence) {
+        return []
+      }
+      return validAddresses.filter((address) =>
+        booleanPointInPolygon(point([address.long, address.lat]), fence.geometry),
+      )
+    }
     return validAddresses.filter((address) =>
       addressInAssignedGeofences(address, geofences, assignedGeofenceIdSet),
     )
@@ -322,6 +341,7 @@ function App() {
     selectedGeofence,
     selectedGeofenceId,
     assignedGeofenceIdList,
+    canvasserEffectiveFocusGeofenceId,
     geofences,
     assignedGeofenceIdSet,
   ])
@@ -361,10 +381,71 @@ function App() {
     const total = rows.length
     return { done, total, percent: Math.round((done / total) * 100) }
   }, [canvasserListRowsLive])
-  const canvasserStreetGroups = useMemo(
-    () => buildStreetGroups(canvasserListRowsLive),
-    [canvasserListRowsLive],
+  const canvasserDrawerOverallProgress = useMemo(
+    () =>
+      canvasserListProgress ?? {
+        done: 0,
+        total: 0,
+        percent: 0,
+      },
+    [canvasserListProgress],
   )
+  const canvasserProgressByGeofence = useMemo(() => {
+    if (role !== 'canvasser') return []
+    const fences = geofences.filter((g) => assignedGeofenceIdSet.has(g.id))
+    const rows = canvasserListRowsLive
+    return fences
+      .map((fence) => {
+        const inFence = rows.filter((addr) =>
+          booleanPointInPolygon(point([addr.long, addr.lat]), fence.geometry),
+        )
+        const total = inFence.length
+        const done = inFence.filter((r) => r.canvassed).length
+        const percent = total === 0 ? 0 : Math.round((done / total) * 100)
+        return {
+          id: fence.id,
+          name: fence.name.trim() || 'Unnamed area',
+          done,
+          total,
+          percent,
+        }
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+  }, [role, geofences, assignedGeofenceIdSet, canvasserListRowsLive])
+  const canvasserRowsForUi = useMemo(() => {
+    if (role !== 'canvasser' || !canvasserEffectiveFocusGeofenceId) {
+      return canvasserListRowsLive
+    }
+    const fence = geofences.find((g) => g.id === canvasserEffectiveFocusGeofenceId)
+    if (!fence) {
+      return canvasserListRowsLive
+    }
+    return canvasserListRowsLive.filter((addr) =>
+      booleanPointInPolygon(point([addr.long, addr.lat]), fence.geometry),
+    )
+  }, [role, canvasserEffectiveFocusGeofenceId, geofences, canvasserListRowsLive])
+  const canvasserStreetGroupsForList = useMemo(
+    () => buildStreetGroups(canvasserRowsForUi),
+    [canvasserRowsForUi],
+  )
+  const canvasserDisplayProgress = useMemo(() => {
+    if (role !== 'canvasser') return null
+    if (!canvasserEffectiveFocusGeofenceId) {
+      return canvasserListProgress
+    }
+    const z = canvasserProgressByGeofence.find((x) => x.id === canvasserEffectiveFocusGeofenceId)
+    if (!z) {
+      return canvasserListProgress
+    }
+    return { done: z.done, total: z.total, percent: z.percent }
+  }, [role, canvasserEffectiveFocusGeofenceId, canvasserListProgress, canvasserProgressByGeofence])
+  const canvasserFocusedZoneLabel = useMemo(() => {
+    if (!canvasserEffectiveFocusGeofenceId) return ''
+    return (
+      canvasserProgressByGeofence.find((z) => z.id === canvasserEffectiveFocusGeofenceId)?.name ??
+      ''
+    )
+  }, [canvasserEffectiveFocusGeofenceId, canvasserProgressByGeofence])
   const adminCount = useMemo(
     () => accessRows.filter((entry) => entry.role === 'admin').length,
     [accessRows],
@@ -479,8 +560,10 @@ function App() {
     const onChange = () => {
       if (mq.matches) {
         setAdminGeofencePanelExpanded(false)
+        setCanvasserAreasPanelExpanded(false)
       } else {
         setAdminGeofencePanelExpanded(true)
+        setCanvasserAreasPanelExpanded(true)
       }
     }
     mq.addEventListener('change', onChange)
@@ -786,7 +869,9 @@ function App() {
 
   useEffect(() => {
     if (!mapRef.current) return
-    // Leaflet can leave gray tile artifacts after overlay/panel layout changes on mobile.
+    // Leaflet can leave gray tile artifacts after layout changes that resize the map pane.
+    // Canvasser areas drawer is overlaid on the map without changing .map-panel size — skipping
+    // invalidateSize there avoids a small first-open map nudge from redundant Leaflet relayout.
     const raf = window.requestAnimationFrame(() => {
       mapRef.current?.invalidateSize(false)
     })
@@ -816,8 +901,15 @@ function App() {
       return
     }
 
+    const fencesToFit = canvasserEffectiveFocusGeofenceId
+      ? assignedFences.filter((g) => g.id === canvasserEffectiveFocusGeofenceId)
+      : assignedFences
+    if (fencesToFit.length === 0) {
+      return
+    }
+
     const bounds = L.latLngBounds([])
-    assignedFences.forEach((fence) => {
+    fencesToFit.forEach((fence) => {
       const ring = fence.geometry.coordinates[0] ?? []
       ring.forEach(([lng, lat]) => {
         bounds.extend([lat, lng])
@@ -829,8 +921,18 @@ function App() {
 
     // Wait one frame after map/tab mount so Leaflet has final dimensions before fitting.
     const raf = window.requestAnimationFrame(() => {
+      const pad = 34
+      // Mobile: canvasser drawer overlays the map bottom (see App.css max-width 900px).
+      // Symmetric padding centers in the full pane including the occluded strip — bias bottom padding
+      // so the fitted bounds sit in the visible map area.
+      const mobileOverlay =
+        typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches
+      const panelBottomInset = mobileOverlay
+        ? canvasserAreasPanelRef.current?.offsetHeight ?? 0
+        : 0
       map.fitBounds(bounds, {
-        padding: [34, 34],
+        paddingTopLeft: [pad, pad],
+        paddingBottomRight: [pad, pad + panelBottomInset],
         maxZoom: 16,
       })
     })
@@ -841,6 +943,7 @@ function App() {
     sessionEmail,
     assignedGeofenceIdList,
     assignedGeofenceIdSet,
+    canvasserEffectiveFocusGeofenceId,
     geofences,
     mapReadySequence,
   ])
@@ -1093,6 +1196,16 @@ function App() {
     setSelectedGeofenceId(id)
     if (role === 'admin') {
       setAdminGeofencePanelExpanded(true)
+    }
+  }
+
+  const handleGeofenceMapPick = (id: string) => {
+    if (role === 'admin') {
+      selectGeofenceId(id)
+      return
+    }
+    if (role === 'canvasser') {
+      setCanvasserFocusedGeofenceId(id)
     }
   }
 
@@ -1393,35 +1506,68 @@ function App() {
         <section className="canvasser-list-page" aria-label="Addresses in your assigned areas">
           <div className="canvasser-list-toolbar">
             <h2 className="canvasser-list-title">Your addresses</h2>
-            {canvasserListProgress ? (
+            {canvasserDisplayProgress ? (
               <span className="canvasser-list-progress">
-                {canvasserListProgress.done}/{canvasserListProgress.total} ·{' '}
-                {canvasserListProgress.percent}%
+                <span className="canvasser-progress-inline">
+                  <span>
+                    {canvasserDisplayProgress.done}/{canvasserDisplayProgress.total}
+                  </span>
+                  <span>{canvasserDisplayProgress.percent}%</span>
+                </span>
               </span>
             ) : null}
           </div>
-          {canvasserListProgress ? (
+          {assignedGeofenceIdList.length > 1 && canvasserEffectiveFocusGeofenceId ? (
+            <div className="canvasser-list-focus-banner">
+              <span className="canvasser-list-focus-banner-label">
+                {canvasserFocusedZoneLabel
+                  ? `Showing: ${canvasserFocusedZoneLabel}`
+                  : 'Showing one zone'}
+              </span>
+              <button
+                type="button"
+                className="canvasser-show-all-zones-btn"
+                onClick={() => setCanvasserFocusedGeofenceId('')}
+              >
+                Show all zones
+              </button>
+            </div>
+          ) : null}
+          {canvasserDisplayProgress ? (
             <div
               className="canvasser-list-progress-wrap"
               role="group"
-              aria-label="Progress in your assigned geofences"
+              aria-label={
+                canvasserEffectiveFocusGeofenceId
+                  ? 'Progress in selected zone'
+                  : 'Progress in your assigned geofences'
+              }
             >
               <div
                 className="canvasser-progress-track"
                 role="progressbar"
                 aria-valuemin={0}
                 aria-valuemax={100}
-                aria-valuenow={canvasserListProgress.percent}
-                aria-valuetext={`${canvasserListProgress.done} of ${canvasserListProgress.total} addresses canvassed`}
+                aria-valuenow={canvasserDisplayProgress.percent}
+                aria-valuetext={`${canvasserDisplayProgress.done} of ${canvasserDisplayProgress.total} addresses canvassed`}
               >
                 <div
                   className="canvasser-progress-fill"
-                  style={{ width: `${canvasserListProgress.percent}%` }}
+                  style={{ width: `${canvasserDisplayProgress.percent}%` }}
                 />
               </div>
               <p className="canvasser-list-metrics-line">
-                {canvasserListProgress.total} in your assigned areas · {canvasserListProgress.done}{' '}
-                canvassed
+                {canvasserEffectiveFocusGeofenceId ? (
+                  <>
+                    {canvasserDisplayProgress.total} in this zone, {canvasserDisplayProgress.done}{' '}
+                    canvassed
+                  </>
+                ) : (
+                  <>
+                    {canvasserDisplayProgress.total} in your assigned areas,{' '}
+                    {canvasserDisplayProgress.done} canvassed
+                  </>
+                )}
               </p>
             </div>
           ) : null}
@@ -1433,9 +1579,20 @@ function App() {
             <p className="error-banner">{canvasserListFetchError}</p>
           ) : canvasserListRowsLive.length === 0 ? (
             <p className="canvasser-list-empty">No addresses found inside your assigned geofences.</p>
+          ) : canvasserRowsForUi.length === 0 ? (
+            <div className="canvasser-list-empty-block">
+              <p className="canvasser-list-empty">No addresses in this zone.</p>
+              <button
+                type="button"
+                className="canvasser-show-all-zones-btn"
+                onClick={() => setCanvasserFocusedGeofenceId('')}
+              >
+                Show all zones
+              </button>
+            </div>
           ) : (
             <div className="canvasser-list-body">
-              {canvasserStreetGroups.map((group) => (
+              {canvasserStreetGroupsForList.map((group) => (
                 <CollapsibleStreetBlock
                   key={group.sortKey}
                   blockClassName="canvasser-street-block"
@@ -1570,13 +1727,17 @@ function App() {
               <GeofenceDrawManager
                 geofences={geofencesForMap}
                 enabled={role === 'admin'}
-                allowGeofenceSelect={role === 'admin'}
+                allowGeofenceSelect={
+                  role === 'admin' ||
+                  (role === 'canvasser' && assignedGeofenceIdList.length > 1)
+                }
                 assignedGeofenceIdList={assignedGeofenceIdList}
                 selectedGeofenceId={selectedGeofenceId}
+                canvasserFocusedGeofenceId={canvasserEffectiveFocusGeofenceId}
                 onCreated={handleGeofenceCreated}
                 onEdited={handleGeofenceEdited}
                 onDeleted={handleGeofenceDeleted}
-                onSelect={selectGeofenceId}
+                onSelect={handleGeofenceMapPick}
               />
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -1787,12 +1948,23 @@ function App() {
           </section>
           {role === 'canvasser' && (
             <aside
-              className="geofence-panel canvasser-areas-panel canvasser-areas-panel--expanded"
+              ref={canvasserAreasPanelRef}
+              className={`geofence-panel canvasser-areas-panel${
+                canvasserAreasPanelExpanded ? ' canvasser-areas-panel--expanded' : ''
+              }`}
               aria-label="Your assigned areas"
             >
-              <div className="canvasser-areas-expandable">
+              <div id="canvasser-areas-expandable" className="canvasser-areas-expandable">
                 <div className="geofence-panel-header canvasser-areas-panel-title-row">
                   <h3>{canvasserAreasTitle}</h3>
+                  <button
+                    type="button"
+                    className="canvasser-drawer-close"
+                    aria-label="Close assigned areas panel"
+                    onClick={() => setCanvasserAreasPanelExpanded(false)}
+                  >
+                    ×
+                  </button>
                 </div>
                 {assignedGeofenceIdList.length === 0 ? (
                   <p className="geofence-panel-lead">
@@ -1802,34 +1974,206 @@ function App() {
                   <p className="geofence-panel-lead">Loading addresses in your areas…</p>
                 ) : canvasserListFetchError ? (
                   <p className="error-banner">{canvasserListFetchError}</p>
-                ) : canvasserListProgress ? (
-                  <div className="geofence-progress">
-                    <div className="progress-summary">
-                      <div className="progress-headline">
-                        <span>
-                          Progress {canvasserListProgress.done}/{canvasserListProgress.total}
-                        </span>
-                        <strong>{canvasserListProgress.percent}%</strong>
-                      </div>
-                      <div
-                        className="progress-bar-track"
-                        role="progressbar"
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-valuenow={canvasserListProgress.percent}
-                        aria-valuetext={`${canvasserListProgress.done} of ${canvasserListProgress.total} addresses canvassed`}
-                      >
-                        <div
-                          className="progress-bar-fill canvasser-areas-progress-fill"
-                          style={{ width: `${canvasserListProgress.percent}%` }}
-                        />
-                      </div>
+                ) : canvasserDisplayProgress ? (
+                  <>
+                    <div className="geofence-progress">
+                      {assignedGeofenceIdList.length > 1 &&
+                      canvasserEffectiveFocusGeofenceId ? (
+                        <button
+                          type="button"
+                          className="progress-summary canvasser-progress-summary--tap-all"
+                          onClick={() => setCanvasserFocusedGeofenceId('')}
+                          aria-label={`Overall ${canvasserDrawerOverallProgress.done} of ${canvasserDrawerOverallProgress.total} canvassed (${canvasserDrawerOverallProgress.percent} percent) across all zones. Tap to show all zones on the map.`}
+                        >
+                          <div className="progress-headline">
+                            <span className="progress-headline-label">Overall</span>
+                            <span className="canvasser-progress-inline">
+                              <span>
+                                {canvasserDrawerOverallProgress.done}/
+                                {canvasserDrawerOverallProgress.total}
+                              </span>
+                              <strong>{canvasserDrawerOverallProgress.percent}%</strong>
+                            </span>
+                          </div>
+                          <div className="progress-bar-track" aria-hidden="true">
+                            <div
+                              className="progress-bar-fill canvasser-areas-progress-fill"
+                              style={{ width: `${canvasserDrawerOverallProgress.percent}%` }}
+                            />
+                          </div>
+                        </button>
+                      ) : (
+                        <div className="progress-summary">
+                          <div className="progress-headline">
+                            <span className="progress-headline-label">Overall</span>
+                            <span className="canvasser-progress-inline">
+                              <span>
+                                {canvasserDrawerOverallProgress.done}/
+                                {canvasserDrawerOverallProgress.total}
+                              </span>
+                              <strong>{canvasserDrawerOverallProgress.percent}%</strong>
+                            </span>
+                          </div>
+                          <div
+                            className="progress-bar-track"
+                            role="progressbar"
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={canvasserDrawerOverallProgress.percent}
+                            aria-valuetext={`${canvasserDrawerOverallProgress.done} of ${canvasserDrawerOverallProgress.total} addresses canvassed`}
+                          >
+                            <div
+                              className="progress-bar-fill canvasser-areas-progress-fill"
+                              style={{ width: `${canvasserDrawerOverallProgress.percent}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
+                    {assignedGeofenceIdList.length > 1 ? (
+                      <div className="canvasser-zone-breakdown">
+                        <h4 className="canvasser-zone-breakdown-heading">By area</h4>
+                        <ul className="canvasser-zone-breakdown-list">
+                          {canvasserProgressByGeofence.map((zone) => (
+                            <li key={zone.id} className="canvasser-zone-breakdown-item">
+                              <button
+                                type="button"
+                                className={`canvasser-zone-focus-option${
+                                  canvasserEffectiveFocusGeofenceId === zone.id
+                                    ? ' canvasser-zone-focus-option--active'
+                                    : ''
+                                }`}
+                                aria-pressed={canvasserEffectiveFocusGeofenceId === zone.id}
+                                onClick={() => setCanvasserFocusedGeofenceId(zone.id)}
+                              >
+                                <div className="canvasser-zone-breakdown-row">
+                                  <span className="canvasser-zone-breakdown-name">{zone.name}</span>
+                                  <span className="canvasser-zone-breakdown-count">
+                                    {zone.total > 0 ? (
+                                      <span className="canvasser-progress-inline canvasser-progress-inline--compact">
+                                        <span>
+                                          {zone.done}/{zone.total}
+                                        </span>
+                                        <span>({zone.percent}%)</span>
+                                      </span>
+                                    ) : (
+                                      <>
+                                        {zone.done}/{zone.total}
+                                      </>
+                                    )}
+                                  </span>
+                                </div>
+                                {zone.total > 0 ? (
+                                  <div
+                                    className="progress-bar-track canvasser-zone-breakdown-bar"
+                                    role="progressbar"
+                                    aria-valuemin={0}
+                                    aria-valuemax={100}
+                                    aria-valuenow={zone.percent}
+                                    aria-valuetext={`${zone.name}: ${zone.done} of ${zone.total} canvassed`}
+                                  >
+                                    <div
+                                      className="progress-bar-fill canvasser-areas-progress-fill"
+                                      style={{ width: `${zone.percent}%` }}
+                                    />
+                                  </div>
+                                ) : (
+                                  <p className="canvasser-zone-breakdown-empty">
+                                    No addresses in this zone
+                                  </p>
+                                )}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </>
                 ) : (
                   <p className="geofence-panel-lead">No addresses found inside your assigned geofences.</p>
                 )}
               </div>
+              <button
+                type="button"
+                className="canvasser-areas-mobile-strip"
+                aria-expanded={canvasserAreasPanelExpanded}
+                aria-controls="canvasser-areas-expandable"
+                onClick={() => setCanvasserAreasPanelExpanded((open) => !open)}
+                aria-label={
+                  canvasserAreasPanelExpanded
+                    ? 'Hide assigned areas details'
+                    : 'Show assigned areas and progress by zone'
+                }
+              >
+                {assignedGeofenceIdList.length === 0 ? (
+                  <div className="canvasser-areas-strip-row">
+                    <span className="canvasser-areas-strip-title">Your areas</span>
+                    <span className="canvasser-areas-strip-meta">None assigned</span>
+                    <span className="canvasser-areas-strip-chevron" aria-hidden="true">
+                      {canvasserAreasPanelExpanded ? '▲' : '▼'}
+                    </span>
+                  </div>
+                ) : isCanvasserListLoading ? (
+                  <div className="canvasser-areas-strip-row">
+                    <span className="canvasser-areas-strip-title">
+                      Your areas ({assignedGeofenceIdList.length}{' '}
+                      {assignedGeofenceIdList.length === 1 ? 'zone' : 'zones'})
+                    </span>
+                    <span className="canvasser-areas-strip-meta">Loading…</span>
+                    <span className="canvasser-areas-strip-chevron" aria-hidden="true">
+                      {canvasserAreasPanelExpanded ? '▲' : '▼'}
+                    </span>
+                  </div>
+                ) : canvasserListFetchError ? (
+                  <div className="canvasser-areas-strip-row">
+                    <span className="canvasser-areas-strip-title">
+                      Your areas ({assignedGeofenceIdList.length}{' '}
+                      {assignedGeofenceIdList.length === 1 ? 'zone' : 'zones'})
+                    </span>
+                    <span className="canvasser-areas-strip-meta">Could not load</span>
+                    <span className="canvasser-areas-strip-chevron" aria-hidden="true">
+                      {canvasserAreasPanelExpanded ? '▲' : '▼'}
+                    </span>
+                  </div>
+                ) : canvasserDisplayProgress ? (
+                  <>
+                    <div className="canvasser-areas-strip-row">
+                      <span className="canvasser-areas-strip-title">
+                        Your areas ({assignedGeofenceIdList.length}{' '}
+                        {assignedGeofenceIdList.length === 1 ? 'zone' : 'zones'})
+                      </span>
+                      <span className="canvasser-areas-strip-meta">
+                        <span className="canvasser-progress-inline">
+                          <span>
+                            {canvasserDisplayProgress.done}/{canvasserDisplayProgress.total}
+                          </span>
+                          <span>{canvasserDisplayProgress.percent}%</span>
+                        </span>
+                      </span>
+                      <span className="canvasser-areas-strip-chevron" aria-hidden="true">
+                        {canvasserAreasPanelExpanded ? '▲' : '▼'}
+                      </span>
+                    </div>
+                    <div className="canvasser-areas-strip-bar" aria-hidden="true">
+                      <div
+                        className="canvasser-areas-strip-bar-fill"
+                        style={{ width: `${canvasserDisplayProgress.percent}%` }}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="canvasser-areas-strip-row">
+                    <span className="canvasser-areas-strip-title">
+                      Your areas ({assignedGeofenceIdList.length}{' '}
+                      {assignedGeofenceIdList.length === 1 ? 'zone' : 'zones'})
+                    </span>
+                    <span className="canvasser-areas-strip-meta">No addresses</span>
+                    <span className="canvasser-areas-strip-chevron" aria-hidden="true">
+                      {canvasserAreasPanelExpanded ? '▲' : '▼'}
+                    </span>
+                  </div>
+                )}
+              </button>
             </aside>
           )}
           {role === 'admin' && (
