@@ -157,6 +157,10 @@ function App() {
     if (typeof window === 'undefined') return true
     return window.matchMedia('(min-width: 901px)').matches
   })
+  /** Admin map + overview: '' = all assignees; otherwise normalized assignee email. */
+  const [adminAreaViewerEmailFilter, setAdminAreaViewerEmailFilter] = useState('')
+  /** Tracks last assignee filter for map fit on dropdown change only. */
+  const prevAdminAreaViewerFilterForMapRef = useRef<string | null>(null)
   const [canvasserAreasPanelExpanded, setCanvasserAreasPanelExpanded] = useState(() => {
     if (typeof window === 'undefined') return true
     return window.matchMedia('(min-width: 901px)').matches
@@ -312,10 +316,23 @@ function App() {
     }
     return `${n} areas assigned`
   }, [assignedGeofenceIdList, geofences])
+  const adminGeofencesFiltered = useMemo(() => {
+    if (role !== 'admin') return geofences
+    const filter = adminAreaViewerEmailFilter.trim().toLowerCase()
+    if (!filter) return geofences
+    return geofences.filter(
+      (g) => (g.assigned_email ?? '').trim().toLowerCase() === filter,
+    )
+  }, [role, geofences, adminAreaViewerEmailFilter])
   const geofencesForMap = useMemo(() => {
-    if (role !== 'canvasser') return geofences
-    return geofences.filter((g) => assignedGeofenceIdSet.has(g.id))
-  }, [role, geofences, assignedGeofenceIdSet])
+    if (role === 'canvasser') {
+      return geofences.filter((g) => assignedGeofenceIdSet.has(g.id))
+    }
+    if (role === 'admin') {
+      return adminGeofencesFiltered
+    }
+    return geofences
+  }, [role, geofences, assignedGeofenceIdSet, adminGeofencesFiltered])
   const geofenceDisplayNameForDelete = useMemo(() => {
     if (!selectedGeofence) return ''
     const trimmed = geofenceNameDraft.trim()
@@ -335,7 +352,7 @@ function App() {
   const adminGeofenceOverviewDisplay = useMemo(() => {
     if (!adminGeofenceOverviewRows) return []
     const byId = new Map(adminGeofenceOverviewRows.map((r) => [r.geofence_id, r]))
-    return geofences
+    return adminGeofencesFiltered
       .map((g) => {
         const p = byId.get(g.id)
         const total = p?.total_count ?? 0
@@ -345,7 +362,63 @@ function App() {
         return { id: g.id, name, total, canvassed, pct }
       })
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [geofences, adminGeofenceOverviewRows])
+  }, [adminGeofencesFiltered, adminGeofenceOverviewRows])
+
+  useEffect(() => {
+    if (role !== 'admin') {
+      setAdminAreaViewerEmailFilter('')
+      prevAdminAreaViewerFilterForMapRef.current = null
+    }
+  }, [role])
+
+  useEffect(() => {
+    if (role !== 'admin') return
+    if (!selectedGeofenceId) return
+    if (!adminGeofencesFiltered.some((g) => g.id === selectedGeofenceId)) {
+      setSelectedGeofenceId('')
+      setGeofencePanelMenuOpen(false)
+    }
+  }, [role, selectedGeofenceId, adminGeofencesFiltered])
+
+  useEffect(() => {
+    if (role !== 'admin') return
+    const map = mapRef.current
+    if (!map) return
+
+    const current = adminAreaViewerEmailFilter.trim().toLowerCase()
+    const prev = prevAdminAreaViewerFilterForMapRef.current
+    if (prev === null) {
+      prevAdminAreaViewerFilterForMapRef.current = current
+      return
+    }
+    if (prev === current) return
+    prevAdminAreaViewerFilterForMapRef.current = current
+
+    if (adminGeofencesFiltered.length === 0) return
+
+    const bounds = L.latLngBounds([])
+    for (const fence of adminGeofencesFiltered) {
+      const ring = fence.geometry.coordinates[0] ?? []
+      for (const [lng, lat] of ring) {
+        bounds.extend([lat, lng])
+      }
+    }
+    if (!bounds.isValid()) return
+
+    const pad = 34
+    const raf = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        map.fitBounds(bounds, {
+          paddingTopLeft: [pad, pad],
+          paddingBottomRight: [pad, pad],
+          maxZoom: 16,
+          animate: true,
+        })
+      })
+    })
+    return () => window.cancelAnimationFrame(raf)
+  }, [role, adminAreaViewerEmailFilter, adminGeofencesFiltered])
+
   const canSubmitPasswordStep =
     authPasswordIntent === 'sign_in'
       ? authPassword.length > 0
@@ -593,6 +666,27 @@ function App() {
     }
     return options.sort((a, b) => a.label.localeCompare(b.label))
   }, [accessRows, geofenceEmailDraft])
+  const adminAreaViewerAssigneeSelectOptions = useMemo(() => {
+    const emails = new Set<string>()
+    for (const g of geofences) {
+      const e = (g.assigned_email ?? '').trim().toLowerCase()
+      if (e) emails.add(e)
+    }
+    for (const row of accessRows) {
+      if (row.role !== 'canvasser') continue
+      const e = row.email.trim().toLowerCase()
+      if (e) emails.add(e)
+    }
+    return Array.from(emails)
+      .sort()
+      .map((value) => {
+        const access = accessRows.find((a) => a.email.trim().toLowerCase() === value)
+        return {
+          value,
+          label: access ? accessDisplayName(access) : value,
+        }
+      })
+  }, [geofences, accessRows])
   const selectedAssigneeOption = useMemo(
     () =>
       geofenceAssigneeOptions.find(
@@ -2497,6 +2591,24 @@ function App() {
                 </div>
               </button>
               <div id="admin-geofence-expandable" className="admin-geofence-expandable">
+                <div className="admin-geofence-viewer-filter">
+                  <label className="admin-geofence-viewer-filter-label" htmlFor="admin-area-viewer-email-filter">
+                    Show areas for
+                  </label>
+                  <select
+                    id="admin-area-viewer-email-filter"
+                    className="admin-geofence-viewer-filter-select"
+                    value={adminAreaViewerEmailFilter}
+                    onChange={(event) => setAdminAreaViewerEmailFilter(event.target.value)}
+                  >
+                    <option value="">All users</option>
+                    {adminAreaViewerAssigneeSelectOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 {selectedGeofence ? (
                   <div className="admin-geofence-back-row">
                     <button
@@ -2696,6 +2808,11 @@ function App() {
                   </>
                 ) : geofences.length === 0 ? (
                   <p>Draw or click an area to edit assignment and view progress.</p>
+                ) : adminGeofencesFiltered.length === 0 ? (
+                  <p className="geofence-panel-lead">
+                    No areas are assigned to this person. Switch the dropdown back to All users or pick another
+                    assignee.
+                  </p>
                 ) : (
                   <div className="admin-geofence-overview">
                     <p className="admin-geofence-overview-hint">

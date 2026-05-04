@@ -182,6 +182,16 @@ export function GeofenceDrawManager({
           onSelect(fence.id)
         })
       }
+      const labelEl = document.createElement('span')
+      labelEl.className = 'geofence-map-label-text'
+      labelEl.textContent = fence.name.trim() || 'Unnamed area'
+      layer.bindTooltip(labelEl, {
+        permanent: true,
+        direction: 'center',
+        className: 'geofence-map-label',
+        interactive: false,
+        opacity: 1,
+      })
       group.addLayer(layer)
     })
   }, [

@@ -705,6 +705,36 @@
   font-weight: 600;
 }
 
+/* Geofence name tags (Leaflet permanent tooltips centered on polygons) */
+.leaflet-tooltip.geofence-map-label {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(203, 213, 225, 0.98);
+  border-radius: 9px;
+  box-shadow:
+    0 2px 12px rgba(15, 23, 42, 0.12),
+    0 0 0 1px rgba(255, 255, 255, 0.55) inset;
+  color: #0f172a;
+  padding: 0.28rem 0.55rem;
+  margin: 0 !important;
+  pointer-events: none;
+  line-height: 1.2;
+}
+
+.leaflet-tooltip.geofence-map-label .geofence-map-label-text {
+  display: block;
+  font-weight: 700;
+  font-size: 0.74rem;
+  letter-spacing: 0.01em;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaflet-tooltip.geofence-map-label::before {
+  display: none;
+}
+
 /* Invisible hit circles: generous when zoomed in, tight when zoomed out so geofence clicks land on polygons. */
 .leaflet-interactive.address-marker-hit {
   cursor: pointer;
@@ -1366,6 +1396,38 @@
 
 .admin-geofence-back-row {
   margin-bottom: 0.45rem;
+}
+
+.admin-geofence-viewer-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.65rem;
+}
+
+.admin-geofence-viewer-filter-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #486581;
+}
+
+.admin-geofence-viewer-filter-select {
+  width: 100%;
+  max-width: 100%;
+  padding: 0.45rem 0.55rem;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #102a43;
+  cursor: pointer;
+}
+
+.admin-geofence-viewer-filter-select:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
 }
 
 .admin-geofence-back-to-all-btn {
