@@ -79,14 +79,14 @@ function createClusterCountIcon(
   })
 }
 
-const CANVASSER_VIEWPORT_STORAGE_VERSION = 'v1'
+/** v2: key is email + assignments only — not focused area. Sleep/resume restores one map view; switching focus always re-frames. */
+const CANVASSER_VIEWPORT_STORAGE_VERSION = 'v2'
 
 function canvasserViewportSessionStorageKey(
   emailNorm: string,
   assignedFenceIdsJoined: string,
-  effectiveFocusId: string,
 ): string {
-  return `canvasser.mapViewport.${CANVASSER_VIEWPORT_STORAGE_VERSION}:${emailNorm}:${assignedFenceIdsJoined}:${effectiveFocusId}`
+  return `canvasser.mapViewport.${CANVASSER_VIEWPORT_STORAGE_VERSION}:${emailNorm}:${assignedFenceIdsJoined}`
 }
 
 type StoredCanvasserViewport = { lat: number; lng: number; zoom: number }
@@ -167,6 +167,12 @@ function App() {
   const canvasserAreasPanelRef = useRef<HTMLElement | null>(null)
   /** Block persisting viewport until fit/restore has run (avoids clobbering sessionStorage with default center/zoom before restore). */
   const canvasserAllowViewportPersistRef = useRef(false)
+  /** Last framing snapshot: distinguish map remount / assignment change from focus-only (restore vs fitBounds). */
+  const canvasserViewportFramingRef = useRef<{
+    mapSeq: number
+    focus: string
+    assignKey: string
+  } | null>(null)
   const accessActionsMenuRef = useRef<HTMLDivElement>(null)
   const handleAuthErrorMessage = useCallback((message: string) => {
     setErrorMessage(message)
@@ -515,11 +521,7 @@ function App() {
       if (!canvasserAllowViewportPersistRef.current) return
       if (!canvasserAssignedFenceIdsKey) return
       const emailNorm = sessionEmail || '(no-email)'
-      const storageKey = canvasserViewportSessionStorageKey(
-        emailNorm,
-        canvasserAssignedFenceIdsKey,
-        canvasserEffectiveFocusGeofenceId,
-      )
+      const storageKey = canvasserViewportSessionStorageKey(emailNorm, canvasserAssignedFenceIdsKey)
       const payload: StoredCanvasserViewport = {
         lat: (next.south + next.north) / 2,
         lng: (next.west + next.east) / 2,
@@ -531,13 +533,7 @@ function App() {
         /* quota / private mode */
       }
     },
-    [
-      role,
-      canvasserUiView,
-      sessionEmail,
-      canvasserAssignedFenceIdsKey,
-      canvasserEffectiveFocusGeofenceId,
-    ],
+    [role, canvasserUiView, sessionEmail, canvasserAssignedFenceIdsKey],
   )
   const onMapViewportChange = useCallback(
     (next: ViewportBounds) => {
@@ -1100,6 +1096,7 @@ function App() {
   useEffect(() => {
     if (role !== 'canvasser' || canvasserUiView !== 'map') {
       canvasserAllowViewportPersistRef.current = false
+      canvasserViewportFramingRef.current = null
       return
     }
     if (assignedGeofenceIdList.length === 0) {
@@ -1134,11 +1131,20 @@ function App() {
     }
 
     const emailNorm = sessionEmail || '(no-email)'
-    const storageKey = canvasserViewportSessionStorageKey(
-      emailNorm,
-      canvasserAssignedFenceIdsKey,
-      canvasserEffectiveFocusGeofenceId,
-    )
+    const storageKey = canvasserViewportSessionStorageKey(emailNorm, canvasserAssignedFenceIdsKey)
+
+    const prevFraming = canvasserViewportFramingRef.current
+    const mapSeqChanged = !prevFraming || prevFraming.mapSeq !== mapReadySequence
+    const focusChanged =
+      !!prevFraming && prevFraming.focus !== canvasserEffectiveFocusGeofenceId
+    const assignChanged =
+      !!prevFraming && prevFraming.assignKey !== canvasserAssignedFenceIdsKey
+
+    canvasserViewportFramingRef.current = {
+      mapSeq: mapReadySequence,
+      focus: canvasserEffectiveFocusGeofenceId,
+      assignKey: canvasserAssignedFenceIdsKey,
+    }
 
     canvasserAllowViewportPersistRef.current = false
 
@@ -1173,12 +1179,22 @@ function App() {
     }
 
     // Wait one frame after map/tab mount so Leaflet has final dimensions.
-    // Prefer sessionStorage (survives reload / tab revive); key includes assignments + focus, so a new scope falls through to fitBounds.
+    // Restore after map remount or assignment change (same storage key = sleep / tab revive).
+    // Focus-only change on the same map: fitBounds only — no per-area zoom memory in sessionStorage.
+    if (!mapSeqChanged && !focusChanged && !assignChanged) {
+      canvasserAllowViewportPersistRef.current = true
+      return () => {}
+    }
+
     let persistUnlockRaf = 0
     const raf = window.requestAnimationFrame(() => {
-      const restored = tryRestoreSavedViewport()
-      if (!restored) {
+      if (focusChanged && !mapSeqChanged) {
         runFitBounds()
+      } else {
+        const restored = tryRestoreSavedViewport()
+        if (!restored) {
+          runFitBounds()
+        }
       }
       persistUnlockRaf = window.requestAnimationFrame(() => {
         canvasserAllowViewportPersistRef.current = true
