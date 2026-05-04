@@ -58,6 +58,14 @@ export type AdminGeofenceProgressRow = {
   remaining_count: number
 }
 
+/** One row per geofence from `admin_list_geofence_progress` (or client fallback). */
+export type AdminGeofenceListProgressRow = {
+  geofence_id: string
+  total_count: number
+  canvassed_count: number
+  remaining_count: number
+}
+
 export type StreetAddressGroup = {
   sortKey: string
   heading: string

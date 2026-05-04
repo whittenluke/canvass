@@ -13,6 +13,7 @@ import { point } from '@turf/helpers'
 import { missingSupabaseConfig, supabase } from './lib/supabase'
 import type {
   AddressRow,
+  AdminGeofenceListProgressRow,
   AdminGeofenceProgressRow,
   AdminMarkGeofenceResultRow,
   GeofenceProgress,
@@ -112,6 +113,8 @@ function parseStoredCanvasserViewport(raw: string | null): StoredCanvasserViewpo
   }
 }
 
+/** When an admin picks an area from the details list, fit the map to that polygon up to this zoom. */
+const ADMIN_AREA_DETAIL_FOCUS_MAX_ZOOM = 17
 
 function App() {
   const [role, setRole] = useState<string>('')
@@ -126,6 +129,11 @@ function App() {
   const [geofenceEmailDraft, setGeofenceEmailDraft] = useState('')
   const [geofenceProgress, setGeofenceProgress] = useState<GeofenceProgress | null>(null)
   const [isGeofenceProgressLoading, setIsGeofenceProgressLoading] = useState(false)
+  const [adminGeofenceOverviewRows, setAdminGeofenceOverviewRows] = useState<
+    AdminGeofenceListProgressRow[] | null
+  >(null)
+  const [isAdminGeofenceOverviewLoading, setIsAdminGeofenceOverviewLoading] = useState(false)
+  const [adminGeofenceOverviewError, setAdminGeofenceOverviewError] = useState('')
   const [geofenceMessage, setGeofenceMessage] = useState('')
   const [geofenceDeleteConfirmId, setGeofenceDeleteConfirmId] = useState<string | null>(null)
   const [isGeofenceDeleting, setIsGeofenceDeleting] = useState(false)
@@ -308,7 +316,7 @@ function App() {
     return trimmed || selectedGeofence.name || 'Unnamed area'
   }, [geofenceNameDraft, selectedGeofence])
   const geofenceDetailsTitle = useMemo(() => {
-    if (!selectedGeofence) return 'Area details'
+    if (!selectedGeofence) return 'All areas'
     const draft = geofenceNameDraft.trim()
     const persisted = selectedGeofence.name?.trim() ?? ''
     const title = draft || persisted
@@ -318,6 +326,20 @@ function App() {
     if (!geofenceProgress || geofenceProgress.total === 0) return 0
     return Math.round((geofenceProgress.canvassed / geofenceProgress.total) * 100)
   }, [geofenceProgress])
+  const adminGeofenceOverviewDisplay = useMemo(() => {
+    if (!adminGeofenceOverviewRows) return []
+    const byId = new Map(adminGeofenceOverviewRows.map((r) => [r.geofence_id, r]))
+    return geofences
+      .map((g) => {
+        const p = byId.get(g.id)
+        const total = p?.total_count ?? 0
+        const canvassed = p?.canvassed_count ?? 0
+        const pct = total === 0 ? 0 : Math.round((canvassed / total) * 100)
+        const name = g.name.trim() || 'Unnamed area'
+        return { id: g.id, name, total, canvassed, pct }
+      })
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [geofences, adminGeofenceOverviewRows])
   const canSubmitPasswordStep =
     authPasswordIntent === 'sign_in'
       ? authPassword.length > 0
@@ -854,6 +876,91 @@ function App() {
   }, [selectedGeofenceId, geofences])
 
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- admin overview when no fence selected */
+    if (role !== 'admin') {
+      setAdminGeofenceOverviewRows(null)
+      setIsAdminGeofenceOverviewLoading(false)
+      setAdminGeofenceOverviewError('')
+      return
+    }
+    if (selectedGeofenceId) {
+      setAdminGeofenceOverviewRows(null)
+      setIsAdminGeofenceOverviewLoading(false)
+      setAdminGeofenceOverviewError('')
+      return
+    }
+    if (!supabase || geofences.length === 0) {
+      setAdminGeofenceOverviewRows(null)
+      setIsAdminGeofenceOverviewLoading(false)
+      setAdminGeofenceOverviewError('')
+      return
+    }
+    let cancelled = false
+    const run = async () => {
+      setIsAdminGeofenceOverviewLoading(true)
+      setAdminGeofenceOverviewError('')
+      setAdminGeofenceOverviewRows(null)
+      try {
+        const { data, error } = await supabase.rpc('admin_list_geofence_progress')
+        if (!cancelled && !error && Array.isArray(data)) {
+          const rows: AdminGeofenceListProgressRow[] = (data as AdminGeofenceListProgressRow[]).map(
+            (r) => ({
+              geofence_id: String(r.geofence_id),
+              total_count: r.total_count,
+              canvassed_count: r.canvassed_count,
+              remaining_count: r.remaining_count,
+            }),
+          )
+          setAdminGeofenceOverviewRows(rows)
+        } else {
+          const fallbackRows: AdminGeofenceListProgressRow[] = await Promise.all(
+            geofences.map(async (g) => {
+              const { data: d, error: e } = await supabase.rpc('admin_get_geofence_progress', {
+                p_geofence_id: g.id,
+              })
+              if (e) {
+                const p = await fetchAddressStatsInsidePolygon(supabase, g.geometry)
+                return {
+                  geofence_id: g.id,
+                  total_count: p.total,
+                  canvassed_count: p.canvassed,
+                  remaining_count: p.remaining,
+                }
+              }
+              const row = ((d as AdminGeofenceProgressRow[] | null) ?? [])[0]
+              return {
+                geofence_id: g.id,
+                total_count: row?.total_count ?? 0,
+                canvassed_count: row?.canvassed_count ?? 0,
+                remaining_count: row?.remaining_count ?? 0,
+              }
+            }),
+          )
+          if (!cancelled) {
+            setAdminGeofenceOverviewRows(fallbackRows)
+          }
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setAdminGeofenceOverviewRows(null)
+          setAdminGeofenceOverviewError(
+            e instanceof Error ? e.message : 'Failed to load area progress',
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          setIsAdminGeofenceOverviewLoading(false)
+        }
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [role, selectedGeofenceId, geofences])
+
+  useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- reset panel/dialog state when fence changes */
     setMarkAllCompleteDialogOpen(false)
     setGeofencePanelMenuOpen(false)
@@ -1337,11 +1444,40 @@ function App() {
     }
   }
 
-  const selectGeofenceId = (id: string) => {
+  const fitAdminMapToFence = (fence: GeofenceRow) => {
+    const map = mapRef.current
+    if (!map) return
+    const ring = fence.geometry.coordinates[0] ?? []
+    if (ring.length === 0) return
+    const bounds = L.latLngBounds([])
+    ring.forEach(([lng, lat]) => {
+      bounds.extend([lat, lng])
+    })
+    if (!bounds.isValid()) return
+    const pad = 34
+    map.fitBounds(bounds, {
+      paddingTopLeft: [pad, pad],
+      paddingBottomRight: [pad, pad],
+      maxZoom: ADMIN_AREA_DETAIL_FOCUS_MAX_ZOOM,
+      animate: true,
+    })
+  }
+
+  const selectGeofenceId = (id: string, options?: { focusOnMap?: boolean }) => {
     setGeofenceDeleteConfirmId(null)
     setSelectedGeofenceId(id)
     if (role === 'admin') {
       setAdminGeofencePanelExpanded(true)
+    }
+    if (role === 'admin' && options?.focusOnMap && id) {
+      const fence = geofences.find((g) => g.id === id)
+      if (fence) {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            fitAdminMapToFence(fence)
+          })
+        })
+      }
     }
   }
 
@@ -2177,24 +2313,24 @@ function App() {
                       )}
                     </div>
                     {assignedGeofenceIdList.length > 1 ? (
-                      <div className="canvasser-zone-breakdown">
-                        <h4 className="canvasser-zone-breakdown-heading">By area</h4>
-                        <ul className="canvasser-zone-breakdown-list">
+                      <div className="canvasser-area-breakdown">
+                        <h4 className="canvasser-area-breakdown-heading">By area</h4>
+                        <ul className="canvasser-area-breakdown-list">
                           {canvasserProgressByGeofence.map((area) => (
-                            <li key={area.id} className="canvasser-zone-breakdown-item">
+                            <li key={area.id} className="canvasser-area-breakdown-item">
                               <button
                                 type="button"
-                                className={`canvasser-zone-focus-option${
+                                className={`canvasser-area-focus-option${
                                   canvasserEffectiveFocusGeofenceId === area.id
-                                    ? ' canvasser-zone-focus-option--active'
+                                    ? ' canvasser-area-focus-option--active'
                                     : ''
                                 }`}
                                 aria-pressed={canvasserEffectiveFocusGeofenceId === area.id}
                                 onClick={() => setCanvasserFocusedGeofenceId(area.id)}
                               >
-                                <div className="canvasser-zone-breakdown-row">
-                                  <span className="canvasser-zone-breakdown-name">{area.name}</span>
-                                  <span className="canvasser-zone-breakdown-count">
+                                <div className="canvasser-area-breakdown-row">
+                                  <span className="canvasser-area-breakdown-name">{area.name}</span>
+                                  <span className="canvasser-area-breakdown-count">
                                     {area.total > 0 ? (
                                       <span className="canvasser-progress-inline canvasser-progress-inline--compact">
                                         <span>
@@ -2211,7 +2347,7 @@ function App() {
                                 </div>
                                 {area.total > 0 ? (
                                   <div
-                                    className="progress-bar-track canvasser-zone-breakdown-bar"
+                                    className="progress-bar-track canvasser-area-breakdown-bar"
                                     role="progressbar"
                                     aria-valuemin={0}
                                     aria-valuemax={100}
@@ -2224,7 +2360,7 @@ function App() {
                                     />
                                   </div>
                                 ) : (
-                                  <p className="canvasser-zone-breakdown-empty">
+                                  <p className="canvasser-area-breakdown-empty">
                                     No addresses in this area
                                   </p>
                                 )}
@@ -2345,6 +2481,17 @@ function App() {
                 </div>
               </button>
               <div id="admin-geofence-expandable" className="admin-geofence-expandable">
+                {selectedGeofence ? (
+                  <div className="admin-geofence-back-row">
+                    <button
+                      type="button"
+                      className="admin-geofence-back-to-all-btn"
+                      onClick={() => selectGeofenceId('')}
+                    >
+                      ← All areas
+                    </button>
+                  </div>
+                ) : null}
                 <div className="geofence-panel-header">
                   <h3>{geofenceDetailsTitle}</h3>
                   {selectedGeofence ? (
@@ -2531,8 +2678,50 @@ function App() {
                     </button>
                   </div>
                   </>
-                ) : (
+                ) : geofences.length === 0 ? (
                   <p>Draw or click an area to edit assignment and view progress.</p>
+                ) : (
+                  <div className="admin-geofence-overview">
+                    <p className="admin-geofence-overview-hint">
+                      Click a row or a polygon to edit assignment and view progress.
+                    </p>
+                    {isAdminGeofenceOverviewLoading ? (
+                      <p className="admin-geofence-overview-status">Loading areas…</p>
+                    ) : adminGeofenceOverviewError ? (
+                      <p className="access-message">{adminGeofenceOverviewError}</p>
+                    ) : (
+                      <ul className="admin-geofence-overview-list" role="list">
+                        {adminGeofenceOverviewDisplay.map((row) => (
+                          <li key={row.id}>
+                            <button
+                              type="button"
+                              className="admin-geofence-overview-row"
+                              onClick={() => selectGeofenceId(row.id, { focusOnMap: true })}
+                            >
+                              <span className="admin-geofence-overview-row-main">
+                                <span className="admin-geofence-overview-row-name">{row.name}</span>
+                                <span className="admin-geofence-overview-row-meta">
+                                  <span>
+                                    {row.canvassed}/{row.total}
+                                  </span>
+                                  <span>{row.pct}%</span>
+                                </span>
+                              </span>
+                              <span
+                                className="progress-bar-track admin-geofence-overview-row-bar"
+                                aria-hidden="true"
+                              >
+                                <span
+                                  className="progress-bar-fill"
+                                  style={{ width: `${row.pct}%` }}
+                                />
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 )}
                 {geofenceMessage && <p className="access-message">{geofenceMessage}</p>}
               </div>

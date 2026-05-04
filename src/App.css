@@ -1364,6 +1364,125 @@
   color: #486581;
 }
 
+.admin-geofence-back-row {
+  margin-bottom: 0.45rem;
+}
+
+.admin-geofence-back-to-all-btn {
+  margin: 0;
+  padding: 0.2rem 0;
+  border: 0;
+  background: transparent;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #2563eb;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-family: inherit;
+}
+
+.admin-geofence-back-to-all-btn:hover {
+  color: #1d4ed8;
+}
+
+.admin-geofence-back-to-all-btn:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.admin-geofence-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-height: 0;
+}
+
+.admin-geofence-overview-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #486581;
+  line-height: 1.45;
+}
+
+.admin-geofence-overview-status {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #475569;
+}
+
+.admin-geofence-overview-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: min(40vh, 280px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.admin-geofence-overview-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  color: #102a43;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.admin-geofence-overview-row:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.admin-geofence-overview-row:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.admin-geofence-overview-row-main {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.admin-geofence-overview-row-name {
+  font-weight: 700;
+  font-size: 0.84rem;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-geofence-overview-row-meta {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.admin-geofence-overview-row-bar {
+  height: 5px;
+}
+
 .canvasser-areas-strip-row {
   display: flex;
   align-items: center;
@@ -1469,11 +1588,11 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
   transition: width 180ms ease;
 }
 
-.canvasser-zone-breakdown {
+.canvasser-area-breakdown {
   margin-top: 0.65rem;
 }
 
-.canvasser-zone-breakdown-heading {
+.canvasser-area-breakdown-heading {
   margin: 0 0 0.45rem;
   font-size: 0.72rem;
   font-weight: 800;
@@ -1482,7 +1601,7 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
   color: #6d28d9;
 }
 
-.canvasser-zone-focus-option {
+.canvasser-area-focus-option {
   display: block;
   width: 100%;
   margin: 0;
@@ -1499,23 +1618,23 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
     border-color 0.15s ease;
 }
 
-.canvasser-zone-focus-option:hover {
+.canvasser-area-focus-option:hover {
   background: #f5f3ff;
   border-color: #c4b5fd;
 }
 
-.canvasser-zone-focus-option:focus-visible {
+.canvasser-area-focus-option:focus-visible {
   outline: 2px solid #7c3aed;
   outline-offset: 2px;
 }
 
-.canvasser-zone-focus-option--active {
+.canvasser-area-focus-option--active {
   border-color: #7c3aed;
   background: #ede9fe;
   box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.25);
 }
 
-.canvasser-zone-focus-option .canvasser-zone-breakdown-empty {
+.canvasser-area-focus-option .canvasser-area-breakdown-empty {
   margin-top: 0.35rem;
 }
 
@@ -1565,7 +1684,7 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
   gap: 0.55rem;
 }
 
-.canvasser-zone-breakdown-list {
+.canvasser-area-breakdown-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -1574,11 +1693,11 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
   gap: 0.55rem;
 }
 
-.canvasser-zone-breakdown-item {
+.canvasser-area-breakdown-item {
   margin: 0;
 }
 
-.canvasser-zone-breakdown-row {
+.canvasser-area-breakdown-row {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -1586,7 +1705,7 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
   margin-bottom: 0.25rem;
 }
 
-.canvasser-zone-breakdown-name {
+.canvasser-area-breakdown-name {
   font-size: 0.84rem;
   font-weight: 700;
   color: #312e81;
@@ -1596,24 +1715,24 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
   white-space: nowrap;
 }
 
-.canvasser-zone-breakdown-count {
+.canvasser-area-breakdown-count {
   flex-shrink: 0;
   font-size: 0.78rem;
   font-weight: 700;
   color: #486581;
 }
 
-.canvasser-zone-breakdown-pct {
+.canvasser-area-breakdown-pct {
   font-weight: 600;
   color: #64748b;
 }
 
-.canvasser-zone-breakdown-bar {
+.canvasser-area-breakdown-bar {
   height: 6px;
   border-radius: 999px;
 }
 
-.canvasser-zone-breakdown-empty {
+.canvasser-area-breakdown-empty {
   margin: 0;
   font-size: 0.76rem;
   color: #64748b;
