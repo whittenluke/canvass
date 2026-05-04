@@ -299,6 +299,27 @@ function App() {
     () => new Set(assignedGeofenceIdList),
     [assignedGeofenceIdList],
   )
+  /** Stable while fence id set unchanged — avoids re-running expensive admin overview RPC on unrelated geofences array churn. */
+  const adminGeofenceIdsKey = useMemo(
+    () =>
+      [...geofences]
+        .map((g) => g.id)
+        .sort()
+        .join('|'),
+    [geofences],
+  )
+  /** Changes when selected fence row meaningfully updates (geometry/name), not when other fences refresh. */
+  const selectedGeofenceProgressFingerprint = useMemo(() => {
+    if (!selectedGeofenceId) return ''
+    const f = geofences.find((x) => x.id === selectedGeofenceId)
+    if (!f) return `${selectedGeofenceId}:missing`
+    const ring = f.geometry.coordinates[0] ?? []
+    let coordChecksum = 0
+    for (const pt of ring) {
+      coordChecksum += (pt[0] ?? 0) + (pt[1] ?? 0)
+    }
+    return `${f.id}:${ring.length}:${coordChecksum.toFixed(6)}:${f.name}:${f.assigned_email ?? ''}`
+  }, [geofences, selectedGeofenceId])
   const canvasserEffectiveFocusGeofenceId = useMemo(() => {
     if (role !== 'canvasser') return ''
     if (assignedGeofenceIdList.length <= 1) return ''
@@ -963,7 +984,7 @@ function App() {
       cancelled = true
     }
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [selectedGeofenceId, geofences])
+  }, [selectedGeofenceProgressFingerprint, supabase])
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- admin overview when no fence selected */
@@ -979,7 +1000,7 @@ function App() {
       setAdminGeofenceOverviewError('')
       return
     }
-    if (!supabase || geofences.length === 0) {
+    if (!supabase || adminGeofenceIdsKey === '') {
       setAdminGeofenceOverviewRows(null)
       setIsAdminGeofenceOverviewLoading(false)
       setAdminGeofenceOverviewError('')
@@ -989,7 +1010,6 @@ function App() {
     const run = async () => {
       setIsAdminGeofenceOverviewLoading(true)
       setAdminGeofenceOverviewError('')
-      setAdminGeofenceOverviewRows(null)
       try {
         const { data, error } = await supabase.rpc('admin_list_geofence_progress')
         if (!cancelled && !error && Array.isArray(data)) {
@@ -1048,7 +1068,8 @@ function App() {
       cancelled = true
     }
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [role, selectedGeofenceId, geofences])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- overview triggers on catalog id set only; run() reads latest geofences from closure when idsKey/role/selection changes
+  }, [role, selectedGeofenceId, adminGeofenceIdsKey, supabase])
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- reset panel/dialog state when fence changes */
