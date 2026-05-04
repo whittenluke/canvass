@@ -2410,6 +2410,11 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
     overflow: hidden;
   }
 
+  /* Single-area detail: save vertical space; assignee filter stays on desktop */
+  .admin-geofence-panel.admin-geofence-panel--detail-open .admin-geofence-viewer-filter {
+    display: none;
+  }
+
   .admin-geofence-mobile-strip {
     display: flex;
     flex-direction: column;

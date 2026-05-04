@@ -2569,7 +2569,7 @@ function App() {
             <aside
               className={`geofence-panel admin-geofence-panel${
                 adminGeofencePanelExpanded ? ' admin-geofence-panel--expanded' : ''
-              }`}
+              }${selectedGeofence ? ' admin-geofence-panel--detail-open' : ''}`}
             >
               <button
                 type="button"
