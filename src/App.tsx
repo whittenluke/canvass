@@ -2612,24 +2612,26 @@ function App() {
                 </div>
               </button>
               <div id="admin-geofence-expandable" className="admin-geofence-expandable">
-                <div className="admin-geofence-viewer-filter">
-                  <label className="admin-geofence-viewer-filter-label" htmlFor="admin-area-viewer-email-filter">
-                    Show areas for
-                  </label>
-                  <select
-                    id="admin-area-viewer-email-filter"
-                    className="admin-geofence-viewer-filter-select"
-                    value={adminAreaViewerEmailFilter}
-                    onChange={(event) => setAdminAreaViewerEmailFilter(event.target.value)}
-                  >
-                    <option value="">All users</option>
-                    {adminAreaViewerAssigneeSelectOptions.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {!selectedGeofence ? (
+                  <div className="admin-geofence-viewer-filter">
+                    <label className="admin-geofence-viewer-filter-label" htmlFor="admin-area-viewer-email-filter">
+                      Show areas for
+                    </label>
+                    <select
+                      id="admin-area-viewer-email-filter"
+                      className="admin-geofence-viewer-filter-select"
+                      value={adminAreaViewerEmailFilter}
+                      onChange={(event) => setAdminAreaViewerEmailFilter(event.target.value)}
+                    >
+                      <option value="">All users</option>
+                      {adminAreaViewerAssigneeSelectOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
                 {selectedGeofence ? (
                   <div className="admin-geofence-back-row">
                     <button
