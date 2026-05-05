@@ -16,6 +16,7 @@ export const VIEWPORT_LIMIT = 6000
 export const DOTS_VISIBLE_MIN_ZOOM_CANVASSER = 15
 export const DOTS_VISIBLE_MIN_ZOOM_ADMIN = 15
 export const ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM = 17
+export const ADDRESS_EXACT_POINT_CLUSTER_MIN_ZOOM = 18
 export const CANVASSER_ADDRESS_HIT_RADIUS_LOOSE_PX = 26
 export const ADDRESS_CLUSTER_MERGE_METERS = 12
 export const ADDRESS_CLUSTER_CROSS_GAP_METERS = 22
@@ -225,6 +226,20 @@ export function clusterAddressesByViewportGrid(
     const gi = Math.floor(a.lat / dLat)
     const gj = Math.floor(a.long / dLng)
     const key = `${gi},${gj}`
+    let bucket = buckets.get(key)
+    if (!bucket) {
+      bucket = []
+      buckets.set(key, bucket)
+    }
+    bucket.push(a)
+  }
+  return [...buckets.values()]
+}
+
+export function clusterAddressesByExactPoint(addresses: AddressRow[]): AddressRow[][] {
+  const buckets = new Map<string, AddressRow[]>()
+  for (const a of addresses) {
+    const key = `${a.lat.toFixed(7)},${a.long.toFixed(7)}`
     let bucket = buckets.get(key)
     if (!bucket) {
       bucket = []

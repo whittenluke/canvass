@@ -22,6 +22,7 @@ import type {
 } from './features/app/types'
 import {
   ADDRESS_CLUSTER_CROSS_GAP_METERS,
+  ADDRESS_EXACT_POINT_CLUSTER_MIN_ZOOM,
   ADDRESS_CLUSTER_MERGE_METERS,
   ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM,
   APP_ROLES,
@@ -34,6 +35,7 @@ import {
   adminAddressHitRadiusPx,
   buildStreetGroups,
   canvasserAddressHitRadiusPx,
+  clusterAddressesByExactPoint,
   clusterAddressesByProximity,
   clusterAddressesByViewportGrid,
   fetchAddressStatsInsidePolygon,
@@ -505,14 +507,20 @@ function App() {
   ])
   const addressClustersForMap = useMemo(() => {
     if (addressesForMapDots.length === 0) return []
+    const zoom = viewport?.zoom ?? 13
+
+    if (zoom >= ADDRESS_EXACT_POINT_CLUSTER_MIN_ZOOM) {
+      const exact = clusterAddressesByExactPoint(addressesForMapDots)
+      return sortClustersSinglesFirst(exact)
+    }
 
     const useProximityClustering =
       role !== 'admin' ||
       !viewport ||
-      viewport.zoom >= ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM
+      zoom >= ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM
 
     if (!useProximityClustering) {
-      const cellPixels = viewport.zoom <= 14 ? 72 : viewport.zoom <= 15 ? 56 : 48
+      const cellPixels = zoom <= 14 ? 72 : zoom <= 15 ? 56 : 48
       const raw = clusterAddressesByViewportGrid(addressesForMapDots, viewport, cellPixels)
       return sortClustersSinglesFirst(raw)
     }
