@@ -129,7 +129,7 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
         {
           title: 'Viewing your areas',
           paragraphs: [
-            'Your assigned areas appear in a list. Click an area to open it and view its progress.',
+            'Your assigned areas appear in a list and on the map. Click an area to open it and view its progress.',
           ],
         },
         {
