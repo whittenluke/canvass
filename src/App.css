@@ -71,11 +71,6 @@
   font-size: clamp(1.35rem, 2.6vw, 1.85rem);
 }
 
-.support-docs-header p {
-  margin: 0.45rem 0 0;
-  color: #486581;
-}
-
 .support-docs-nav {
   display: flex;
   flex-wrap: wrap;

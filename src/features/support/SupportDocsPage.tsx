@@ -3,11 +3,10 @@ type SupportDocsPageProps = {
   viewerRole: 'admin' | 'canvasser'
 }
 
-function SupportHeader({ title, subtitle }: { title: string; subtitle: string }) {
+function SupportHeader({ title }: { title: string }) {
   return (
     <header className="support-docs-header">
       <h1>{title}</h1>
-      <p>{subtitle}</p>
     </header>
   )
 }
@@ -32,9 +31,6 @@ function SupportSection({
 export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) {
   const isAdmin = audience === 'admins'
   const title = isAdmin ? 'Admin Guide' : 'Canvasser Guide'
-  const subtitle = isAdmin
-    ? 'How admins use Canvass day to day.'
-    : 'How canvassers use Canvass in assigned areas.'
 
   const sections = isAdmin
     ? [
@@ -144,25 +140,10 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
           ],
         },
         {
-          title: 'Progress',
-          paragraphs: [
-            'Each assigned area shows progress so you can quickly see how much of the area has been completed.',
-          ],
-        },
-        {
           title: 'Important limits',
           paragraphs: [
             'Canvassers only see areas assigned to them.',
             'Canvassers cannot work outside their assigned areas.',
-          ],
-        },
-        {
-          title: 'Best practices for canvassers',
-          paragraphs: [
-            'Start by opening the area you are assigned to.',
-            'Use the map for location awareness and the address list when you want a faster way to work through streets.',
-            'Mark addresses as you go so progress stays accurate.',
-            'If you are unsure which area to work, contact the admin before starting.',
           ],
         },
       ]
@@ -191,7 +172,7 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
             </nav>
           ) : null}
         </div>
-        <SupportHeader title={title} subtitle={subtitle} />
+        <SupportHeader title={title} />
         <article className="support-docs-content">
           {sections.map((section) => (
             <SupportSection
