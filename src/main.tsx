@@ -6,6 +6,22 @@ import './index.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './ErrorBoundary'
 import { SupportDocsPage } from './features/support/SupportDocsPage'
+
+const CHUNK_RECOVERY_KEY = 'canvass.chunk-recovery-attempted'
+
+function recoverOnceFromChunkFailure(event?: Event) {
+  event?.preventDefault()
+  if (typeof window === 'undefined') return
+  const alreadyRetried = window.sessionStorage.getItem(CHUNK_RECOVERY_KEY) === '1'
+  if (alreadyRetried) return
+  window.sessionStorage.setItem(CHUNK_RECOVERY_KEY, '1')
+  window.location.reload()
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('vite:preloadError', recoverOnceFromChunkFailure as EventListener)
+}
+
 const pathname = typeof window === 'undefined' ? '/' : window.location.pathname.toLowerCase()
 const rootView =
   pathname === '/support/admins' ? (
@@ -23,6 +39,10 @@ createRoot(document.getElementById('root')!).render(
     </ErrorBoundary>
   </StrictMode>,
 )
+
+if (typeof window !== 'undefined') {
+  window.sessionStorage.removeItem(CHUNK_RECOVERY_KEY)
+}
 
 if (import.meta.env.DEV && 'serviceWorker' in navigator) {
   void navigator.serviceWorker.getRegistrations().then((registrations) => {
