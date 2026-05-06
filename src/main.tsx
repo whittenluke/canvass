@@ -5,11 +5,21 @@ import 'leaflet-draw/dist/leaflet.draw.css'
 import './index.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './ErrorBoundary'
+import { SupportDocsPage } from './features/support/SupportDocsPage'
+const pathname = typeof window === 'undefined' ? '/' : window.location.pathname.toLowerCase()
+const rootView =
+  pathname === '/support/admins' ? (
+    <SupportDocsPage audience="admins" />
+  ) : pathname === '/support/canvassers' ? (
+    <SupportDocsPage audience="canvassers" />
+  ) : (
+    <App />
+  )
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <App />
+      {rootView}
     </ErrorBoundary>
   </StrictMode>,
 )
