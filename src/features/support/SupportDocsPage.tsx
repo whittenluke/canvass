@@ -1,5 +1,6 @@
 type SupportDocsPageProps = {
   audience: 'admins' | 'canvassers'
+  viewerRole: 'admin' | 'canvasser'
 }
 
 function SupportHeader({ title, subtitle }: { title: string; subtitle: string }) {
@@ -21,14 +22,14 @@ function SupportSection({
   return (
     <section className="support-docs-section">
       <h2>{title}</h2>
-      {paragraphs.map((paragraph) => (
-        <p key={paragraph}>{paragraph}</p>
+      {paragraphs.map((paragraph, i) => (
+        <p key={i}>{paragraph}</p>
       ))}
     </section>
   )
 }
 
-export function SupportDocsPage({ audience }: SupportDocsPageProps) {
+export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) {
   const isAdmin = audience === 'admins'
   const title = isAdmin ? 'Admin Guide' : 'Canvasser Guide'
   const subtitle = isAdmin
@@ -169,21 +170,28 @@ export function SupportDocsPage({ audience }: SupportDocsPageProps) {
   return (
     <main className="support-docs-shell">
       <div className="support-docs-card">
+        <div className="support-docs-toolbar">
+          <a className="support-docs-back" href="/">
+            Back to Canvass
+          </a>
+          {viewerRole === 'admin' ? (
+            <nav className="support-docs-nav" aria-label="Guide versions">
+              <a
+                className={isAdmin ? 'support-docs-link active' : 'support-docs-link'}
+                href="/support/admins"
+              >
+                Admin guide
+              </a>
+              <a
+                className={!isAdmin ? 'support-docs-link active' : 'support-docs-link'}
+                href="/support/canvassers"
+              >
+                Canvasser guide
+              </a>
+            </nav>
+          ) : null}
+        </div>
         <SupportHeader title={title} subtitle={subtitle} />
-        <nav className="support-docs-nav" aria-label="Support pages">
-          <a
-            className={isAdmin ? 'support-docs-link active' : 'support-docs-link'}
-            href="/support/admins"
-          >
-            For Admins
-          </a>
-          <a
-            className={!isAdmin ? 'support-docs-link active' : 'support-docs-link'}
-            href="/support/canvassers"
-          >
-            For Canvassers
-          </a>
-        </nav>
         <article className="support-docs-content">
           {sections.map((section) => (
             <SupportSection

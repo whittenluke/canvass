@@ -1855,9 +1855,11 @@ function App() {
       <header className="top-bar">
         <h1>Canvass</h1>
         <span className="top-bar-user-email">{session.user.email ?? ''}</span>
-        <a className="support-link-button" href={supportHref}>
-          Support
-        </a>
+        {(role === 'admin' || role === 'canvasser') && (
+          <a className="support-link-button" href={supportHref}>
+            Support
+          </a>
+        )}
         <button type="button" className="signout-button" onClick={() => void signOut()}>
           Sign out
         </button>

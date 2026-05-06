@@ -5,7 +5,7 @@ import 'leaflet-draw/dist/leaflet.draw.css'
 import './index.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './ErrorBoundary'
-import { SupportDocsPage } from './features/support/SupportDocsPage'
+import { SupportGuideRoot } from './features/support/SupportGuideRoot'
 
 const CHUNK_RECOVERY_KEY = 'canvass.chunk-recovery-attempted'
 
@@ -25,9 +25,9 @@ if (typeof window !== 'undefined') {
 const pathname = typeof window === 'undefined' ? '/' : window.location.pathname.toLowerCase()
 const rootView =
   pathname === '/support/admins' ? (
-    <SupportDocsPage audience="admins" />
+    <SupportGuideRoot requestedAudience="admins" />
   ) : pathname === '/support/canvassers' ? (
-    <SupportDocsPage audience="canvassers" />
+    <SupportGuideRoot requestedAudience="canvassers" />
   ) : (
     <App />
   )
