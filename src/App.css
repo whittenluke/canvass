@@ -124,6 +124,21 @@
   line-height: 1.55;
 }
 
+.support-docs-list {
+  margin: 0.45rem 0 0;
+  padding-left: 1.35rem;
+  color: #334e68;
+  line-height: 1.55;
+}
+
+.support-docs-list li {
+  margin: 0.3rem 0;
+}
+
+.support-docs-list li:first-child {
+  margin-top: 0;
+}
+
 @media (max-width: 700px) {
   .support-docs-shell {
     padding: 0.7rem;

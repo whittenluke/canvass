@@ -11,19 +11,25 @@ function SupportHeader({ title }: { title: string }) {
   )
 }
 
-function SupportSection({
-  title,
-  paragraphs,
-}: {
+type DocSection = {
   title: string
-  paragraphs: string[]
-}) {
+  paragraphs?: string[]
+  listItems?: string[]
+}
+
+function SupportSection({ title, paragraphs, listItems }: DocSection) {
   return (
     <section className="support-docs-section">
       <h2>{title}</h2>
-      {paragraphs.map((paragraph, i) => (
-        <p key={i}>{paragraph}</p>
-      ))}
+      {listItems && listItems.length > 0 ? (
+        <ul className="support-docs-list">
+          {listItems.map((item, i) => (
+            <li key={i}>{item}</li>
+          ))}
+        </ul>
+      ) : (
+        (paragraphs ?? []).map((paragraph, i) => <p key={i}>{paragraph}</p>)
+      )}
     </section>
   )
 }
@@ -106,9 +112,12 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
       ]
     : [
         {
-          title: 'What you can do',
-          paragraphs: [
-            'You can sign in, view the areas assigned to you, track progress for each area, and mark addresses as canvassed from either the map or the address list.',
+          title: 'What you can do in this app',
+          listItems: [
+            'Sign in',
+            'View the areas assigned to you',
+            'Track progress for each area',
+            'Mark addresses as canvassed from either the map or the address list',
           ],
         },
         {
@@ -175,11 +184,7 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
         <SupportHeader title={title} />
         <article className="support-docs-content">
           {sections.map((section) => (
-            <SupportSection
-              key={section.title}
-              title={section.title}
-              paragraphs={section.paragraphs}
-            />
+            <SupportSection key={section.title} {...section} />
           ))}
         </article>
       </div>
