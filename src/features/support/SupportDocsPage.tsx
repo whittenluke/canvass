@@ -106,15 +106,15 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
       ]
     : [
         {
-          title: 'What canvassers can do',
+          title: 'What you can do',
           paragraphs: [
-            'Canvassers can sign in, view only the areas assigned to them, see progress for each assigned area, and mark addresses canvassed from either the map or the address list.',
+            'You can sign in, view the areas assigned to you, track progress for each area, and mark addresses as canvassed from either the map or the address list.',
           ],
         },
         {
           title: 'Signing in',
           paragraphs: [
-            'Open Canvass and sign in using the email link sent to you. After signing in, you will see only the areas assigned to you.',
+            'Open Canvass and sign in using the email link sent to you. After you sign in, you will only see the areas assigned to you.',
           ],
         },
         {
@@ -126,9 +126,9 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
         {
           title: 'Using the map',
           paragraphs: [
-            'When you open an assigned area, you can view the addresses on the map and mark them as canvassed.',
+            'When you open an assigned area, you can view its addresses on the map and mark them as canvassed.',
             'Tap an address dot, then use the button to mark it canvassed.',
-            'If a correction is needed, you can mark it uncanvassed.',
+            'If you need to correct something, you can mark it uncanvassed.',
           ],
         },
         {
@@ -136,14 +136,14 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
           paragraphs: [
             'You can also switch to Address mode. In this view, addresses are grouped by street.',
             'Open a street section to see the addresses in that group. Use the button next to an address to mark it canvassed.',
-            'This view is useful when map dots are close together or when you want to work through a street in order.',
+            'This view is helpful when map dots are close together or when you want to work through a street in order.',
           ],
         },
         {
           title: 'Important limits',
           paragraphs: [
-            'Canvassers only see areas assigned to them.',
-            'Canvassers cannot work outside their assigned areas.',
+            'You will only see areas assigned to you.',
+            'You cannot work outside your assigned areas.',
           ],
         },
       ]
