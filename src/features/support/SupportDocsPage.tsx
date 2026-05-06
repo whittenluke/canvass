@@ -137,7 +137,7 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
           paragraphs: [
             'When you open an assigned area, you can view its addresses on the map and mark them as canvassed.',
             'Tap an address dot, then use the button to mark it canvassed.',
-            'If you need to correct something, you can mark it uncanvassed.',
+            'You can also mark an address uncanvassed the same way.',
           ],
         },
         {
