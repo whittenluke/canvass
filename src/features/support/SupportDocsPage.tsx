@@ -15,12 +15,22 @@ type DocSection = {
   title: string
   paragraphs?: string[]
   listItems?: string[]
+  imageSrc?: string
+  imageAlt?: string
 }
 
-function SupportSection({ title, paragraphs, listItems }: DocSection) {
+function SupportSection({ title, paragraphs, listItems, imageSrc, imageAlt }: DocSection) {
   return (
     <section className="support-docs-section">
       <h2>{title}</h2>
+      {imageSrc ? (
+        <img
+          className="support-docs-section-image"
+          src={imageSrc}
+          alt={imageAlt ?? ''}
+          loading="lazy"
+        />
+      ) : null}
       {listItems && listItems.length > 0 ? (
         <ul className="support-docs-list">
           {listItems.map((item, i) => (
@@ -121,13 +131,10 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
           ],
         },
         {
-          title: 'Signing in',
-          paragraphs: [
-            'Open Canvass and sign in using the email link sent to you. After you sign in, you will only see the areas assigned to you.',
-          ],
-        },
-        {
           title: 'Viewing your areas',
+          imageSrc: '/images/support-canvasser-landing.png',
+          imageAlt:
+            'Canvasser map view showing assigned area with address dots and progress at the bottom.',
           paragraphs: [
             'Your assigned areas appear in a list and on the map. Click an area to open it and view its progress.',
           ],
@@ -143,7 +150,7 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
         {
           title: 'Using address view',
           paragraphs: [
-            'You can also switch to Address mode. In this view, addresses are grouped by street.',
+            'In addition to the map view, you can also view addresses in your area using the address view. In this view, addresses are grouped by street.',
             'Open a street section to see the addresses in that group. Use the button next to an address to mark it canvassed.',
             'This view is helpful when map dots are close together or when you want to work through a street in order.',
           ],

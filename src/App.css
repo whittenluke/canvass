@@ -118,6 +118,16 @@
   font-size: 1.02rem;
 }
 
+.support-docs-section-image {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  margin: 0.6rem 0 0.5rem;
+  border-radius: 8px;
+  border: 1px solid #d9e2ec;
+}
+
 .support-docs-section p {
   margin: 0.45rem 0 0;
   color: #334e68;
