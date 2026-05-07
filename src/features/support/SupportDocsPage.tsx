@@ -179,7 +179,7 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
           imageSrc: '/images/support-canvass-address-view.png',
           imageAlt:
             'Address list view with streets grouped, expanded street showing addresses and Mark canvassed buttons.',
-          paragraphs: [
+          imageCaption: [
             'In addition to the map view, you can also view addresses in your area using the address view. In this view, addresses are grouped by street.',
             'Open a street section to see the addresses in that group. Use the button next to an address to mark it canvassed.',
             'This view is helpful when map dots are close together or when you want to work through a street in order.',
