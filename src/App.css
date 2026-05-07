@@ -121,9 +121,11 @@
 .support-docs-section-image {
   display: block;
   width: 100%;
-  max-width: 100%;
+  max-width: min(100%, 32rem);
+  max-height: min(65vh, 520px);
   height: auto;
-  margin: 0.6rem 0 0.5rem;
+  margin: 0.6rem auto 0.5rem;
+  object-fit: contain;
   border-radius: 8px;
   border: 1px solid #d9e2ec;
 }
