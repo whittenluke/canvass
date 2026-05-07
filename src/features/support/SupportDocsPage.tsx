@@ -17,9 +17,18 @@ type DocSection = {
   listItems?: string[]
   imageSrc?: string
   imageAlt?: string
+  /** Centered caption directly under the image */
+  imageCaption?: string
 }
 
-function SupportSection({ title, paragraphs, listItems, imageSrc, imageAlt }: DocSection) {
+function SupportSection({
+  title,
+  paragraphs,
+  listItems,
+  imageSrc,
+  imageAlt,
+  imageCaption,
+}: DocSection) {
   return (
     <section className="support-docs-section">
       <h2>{title}</h2>
@@ -30,6 +39,9 @@ function SupportSection({ title, paragraphs, listItems, imageSrc, imageAlt }: Do
           alt={imageAlt ?? ''}
           loading="lazy"
         />
+      ) : null}
+      {imageCaption ? (
+        <p className="support-docs-image-caption">{imageCaption}</p>
       ) : null}
       {listItems && listItems.length > 0 ? (
         <ul className="support-docs-list">
@@ -126,18 +138,17 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
           listItems: [
             'Sign in',
             'View the areas assigned to you',
-            'Track progress for each area',
             'Mark addresses as canvassed from either the map or the address list',
+            'Track progress for each area',
           ],
         },
         {
-          title: 'Viewing your areas',
+          title: 'Viewing your assigned areas',
           imageSrc: '/images/support-canvasser-landing.png',
           imageAlt:
             'Canvasser map view showing assigned area with address dots and progress at the bottom.',
-          paragraphs: [
+          imageCaption:
             'Your assigned areas appear in a list and on the map. Click an area to open it and view its progress.',
-          ],
         },
         {
           title: 'Using the map',
