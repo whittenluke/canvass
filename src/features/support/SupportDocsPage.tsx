@@ -89,7 +89,7 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
           imageSrc: '/images/support-admin-map-view.png',
           imageAlt:
             'Admin map showing labeled areas, draw tools, and Map and Admin Access navigation.',
-          paragraphs: [
+          imageCaption: [
             'The admin map shows all created areas. Each area has a label and can be selected either from the map or from the side panel.',
             'When no area is selected, address dots can be shown across the full map.',
             'When an area is selected, the map centers on that area. If dots are turned on, only the dots in that area are shown.',
