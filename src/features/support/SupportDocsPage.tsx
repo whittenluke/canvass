@@ -78,18 +78,13 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
         {
           title: 'What admins can do',
           listItems: [
-            'Add and remove users',
             'View the full map, create and manage areas, assign areas to users, and track progress',
+            'Add and remove users',
             'Mark individual addresses canvassed or uncanvassed',
             'Mark an entire area canvassed or uncanvassed when needed',
           ],
         },
-        {
-          title: 'Signing in',
-          paragraphs: [
-            'Open Canvass and sign in using the email link sent to you. After signing in, you will land on the main map view.',
-          ],
-        },
+
         {
           title: 'Understanding the admin map',
           paragraphs: [
