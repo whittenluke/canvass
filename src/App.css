@@ -133,7 +133,7 @@
 .support-docs-section p.support-docs-image-caption {
   margin: 0 auto 0.5rem;
   max-width: min(100%, 32rem);
-  text-align: center;
+  text-align: left;
   font-size: 0.92rem;
   line-height: 1.5;
   color: #486581;

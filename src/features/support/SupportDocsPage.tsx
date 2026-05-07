@@ -17,7 +17,7 @@ type DocSection = {
   listItems?: string[]
   imageSrc?: string
   imageAlt?: string
-  /** Centered caption directly under the image */
+  /** Caption under the image; same max-width as the image, left-aligned */
   imageCaption?: string
 }
 
