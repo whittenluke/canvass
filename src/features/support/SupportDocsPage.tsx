@@ -77,8 +77,11 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
     ? [
         {
           title: 'What admins can do',
-          paragraphs: [
-            'Admins can view the full map, create and manage areas, assign areas to users, and track progress. Admins can also mark individual addresses canvassed or uncanvassed, and can mark an entire area canvassed or uncanvassed when needed.',
+          listItems: [
+            'Add and remove users',
+            'View the full map, create and manage areas, assign areas to users, and track progress',
+            'Mark individual addresses canvassed or uncanvassed',
+            'Mark an entire area canvassed or uncanvassed when needed',
           ],
         },
         {
@@ -183,13 +186,6 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
             'In addition to the map view, you can also view addresses in your area using the address view. In this view, addresses are grouped by street.',
             'Open a street section to see the addresses in that group. Use the button next to an address to mark it canvassed.',
             'This view is helpful when map dots are close together or when you want to work through a street in order.',
-          ],
-        },
-        {
-          title: 'Important limits',
-          paragraphs: [
-            'You will only see areas assigned to you.',
-            'You cannot work outside your assigned areas.',
           ],
         },
       ]
