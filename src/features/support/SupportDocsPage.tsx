@@ -17,8 +17,13 @@ type DocSection = {
   listItems?: string[]
   imageSrc?: string
   imageAlt?: string
-  /** Caption under the image; same max-width as the image, left-aligned */
-  imageCaption?: string
+  /** One or more captions under the image; same width as the image, left-aligned */
+  imageCaption?: string | string[]
+}
+
+function imageCaptionLines(caption: string | string[] | undefined): string[] {
+  if (caption == null) return []
+  return Array.isArray(caption) ? caption : [caption]
 }
 
 function SupportSection({
@@ -29,6 +34,8 @@ function SupportSection({
   imageAlt,
   imageCaption,
 }: DocSection) {
+  const captions = imageCaptionLines(imageCaption)
+
   return (
     <section className="support-docs-section">
       <h2>{title}</h2>
@@ -40,8 +47,14 @@ function SupportSection({
           loading="lazy"
         />
       ) : null}
-      {imageCaption ? (
-        <p className="support-docs-image-caption">{imageCaption}</p>
+      {captions.length > 0 ? (
+        <div className="support-docs-image-caption-wrap">
+          {captions.map((line, i) => (
+            <p key={i} className="support-docs-image-caption">
+              {line}
+            </p>
+          ))}
+        </div>
       ) : null}
       {listItems && listItems.length > 0 ? (
         <ul className="support-docs-list">
@@ -155,7 +168,7 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
           imageSrc: '/images/support-canvasser-marked-canvassed.png',
           imageAlt:
             'Address popup on the map with full address and Mark canvassed button.',
-          paragraphs: [
+          imageCaption: [
             'When you open an assigned area, you can view its addresses on the map and mark them as canvassed.',
             'Tap an address dot, then use the button to mark it canvassed.',
             'You can also mark an address uncanvassed the same way.',

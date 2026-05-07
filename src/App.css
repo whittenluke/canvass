@@ -121,9 +121,17 @@
   border: 1px solid #d9e2ec;
 }
 
-.support-docs-section p.support-docs-image-caption {
+.support-docs-image-caption-wrap {
   margin: 0 auto 0.5rem;
   max-width: min(100%, 32rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.support-docs-section p.support-docs-image-caption {
+  margin: 0;
+  max-width: none;
   text-align: left;
   font-size: 0.92rem;
   line-height: 1.5;
