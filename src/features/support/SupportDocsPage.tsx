@@ -123,7 +123,10 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
         },
         {
           title: 'Creating an area',
-          paragraphs: [
+          imageSrc: '/images/support-admin-draw-geofence.png',
+          imageAlt:
+            'Drawing a new area on the map with polygon tool, Finish and Cancel controls.',
+          imageCaption: [
             'Use the map tools to draw a new area around the neighborhood or section you want to assign. After drawing it, save it and give it a clear name.',
             'Area names should describe the place or section, not just the person working it, whenever possible.',
           ],
