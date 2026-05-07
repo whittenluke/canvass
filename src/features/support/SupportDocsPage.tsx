@@ -152,6 +152,9 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
         },
         {
           title: 'Using the map',
+          imageSrc: '/images/support-canvasser-marked-canvassed.png',
+          imageAlt:
+            'Address popup on the map with full address and Mark canvassed button.',
           paragraphs: [
             'When you open an assigned area, you can view its addresses on the map and mark them as canvassed.',
             'Tap an address dot, then use the button to mark it canvassed.',
