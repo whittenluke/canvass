@@ -113,6 +113,11 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
                 'Admin map with no area selected: address dots shown across the full map.',
             },
             'When no area is selected, address dots can be shown across the full map.',
+            {
+              imageSrc: '/images/support-admin-area-selected.png',
+              imageAlt:
+                'Admin map with an area selected: map framed on the area and dots only inside it.',
+            },
             'When an area is selected, the map centers on that area. If dots are turned on, only the dots in that area are shown.',
           ],
         },
