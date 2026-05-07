@@ -101,6 +101,16 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
           ],
         },
         {
+          title: 'Managing users',
+          imageSrc: '/images/support-admin-manage-users.png',
+          imageAlt:
+            'Admin Access panel with user list, roles, and Add user button.',
+          imageCaption: [
+            'Open Admin Access from the top navigation to manage who can sign in and what role they have.',
+            'From this page you can add users, edit users, and delete users.',
+          ],
+        },
+        {
           title: 'Understanding the admin map',
           imageSrc: '/images/support-admin-map-view.png',
           imageAlt:
@@ -127,14 +137,9 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
           imageAlt:
             'Drawing a new area on the map with polygon tool, Finish and Cancel controls.',
           imageCaption: [
-            'Use the map tools to draw a new area around the neighborhood or section you want to assign. After drawing it, save it and give it a clear name.',
+            'Select the polygon icon on the map to enter draw mode.', 
+            'Once in draw mode, you can draw a new area around the neighborhood or section you want to assign. After drawing it, save it and give it a clear name.',
             'Area names should describe the place or section, not just the person working it, whenever possible.',
-          ],
-        },
-        {
-          title: 'Renaming an area',
-          paragraphs: [
-            'Select the area from the map or side panel. Update the area name in the details panel and save your change.',
           ],
         },
         {
@@ -142,6 +147,12 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
           paragraphs: [
             'Select an area, then assign it to a user by entering or selecting their email. Once assigned, that user will see the area after signing in.',
             'You can reassign an area later if needed.',
+          ],
+        },
+        {
+          title: 'Renaming an area',
+          paragraphs: [
+            'Select the area from the map or side panel. Update the area name in the details panel and save your change.',
           ],
         },
         {
