@@ -31,9 +31,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 0.65rem 1rem;
-  padding-bottom: 0.35rem;
-  border-bottom: 1px solid #e4ebf2;
-  margin-bottom: 0.85rem;
 }
 
 .support-docs-back {
@@ -99,17 +96,11 @@
 
 .support-docs-content {
   display: grid;
-  gap: 0;
+  gap: 1.35rem;
 }
 
 .support-docs-section {
-  padding: 1rem 0;
-  border-bottom: 1px solid #e4ebf2;
-}
-
-.support-docs-section:last-child {
-  border-bottom: 0;
-  padding-bottom: 0.2rem;
+  padding: 0;
 }
 
 .support-docs-section h2 {
