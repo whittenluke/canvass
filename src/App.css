@@ -121,6 +121,18 @@
   border: 1px solid #d9e2ec;
 }
 
+.support-docs-caption-inline-image {
+  display: block;
+  width: 100%;
+  max-width: min(100%, 32rem);
+  max-height: min(65vh, 520px);
+  height: auto;
+  margin: 0.35rem auto 0.35rem;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 1px solid #d9e2ec;
+}
+
 .support-docs-image-caption-wrap {
   margin: 0 auto 0.5rem;
   max-width: min(100%, 32rem);

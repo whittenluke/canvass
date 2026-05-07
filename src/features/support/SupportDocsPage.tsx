@@ -11,19 +11,25 @@ function SupportHeader({ title }: { title: string }) {
   )
 }
 
+/** Text line or inline screenshot inside a caption block */
+type SupportCaptionPart =
+  | string
+  | { imageSrc: string; imageAlt: string }
+
 type DocSection = {
   title: string
   paragraphs?: string[]
   listItems?: string[]
   imageSrc?: string
   imageAlt?: string
-  /** One or more captions under the image; same width as the image, left-aligned */
-  imageCaption?: string | string[]
+  /** Captions under the lead image; strings and optional inline images */
+  imageCaption?: string | SupportCaptionPart[]
 }
 
-function imageCaptionLines(caption: string | string[] | undefined): string[] {
+function imageCaptionParts(caption: string | SupportCaptionPart[] | undefined): SupportCaptionPart[] {
   if (caption == null) return []
-  return Array.isArray(caption) ? caption : [caption]
+  if (typeof caption === 'string') return [caption]
+  return caption
 }
 
 function SupportSection({
@@ -34,7 +40,7 @@ function SupportSection({
   imageAlt,
   imageCaption,
 }: DocSection) {
-  const captions = imageCaptionLines(imageCaption)
+  const captions = imageCaptionParts(imageCaption)
 
   return (
     <section className="support-docs-section">
@@ -49,11 +55,21 @@ function SupportSection({
       ) : null}
       {captions.length > 0 ? (
         <div className="support-docs-image-caption-wrap">
-          {captions.map((line, i) => (
-            <p key={i} className="support-docs-image-caption">
-              {line}
-            </p>
-          ))}
+          {captions.map((part, i) =>
+            typeof part === 'string' ? (
+              <p key={i} className="support-docs-image-caption">
+                {part}
+              </p>
+            ) : (
+              <img
+                key={i}
+                className="support-docs-caption-inline-image"
+                src={part.imageSrc}
+                alt={part.imageAlt}
+                loading="lazy"
+              />
+            ),
+          )}
         </div>
       ) : null}
       {listItems && listItems.length > 0 ? (
@@ -91,6 +107,11 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
             'Admin map showing labeled areas, draw tools, and Map and Admin Access navigation.',
           imageCaption: [
             'The admin map shows all created areas. Each area has a label and can be selected either from the map or from the side panel.',
+            {
+              imageSrc: '/images/support-admin-no-area-selected.png',
+              imageAlt:
+                'Admin map with no area selected: address dots shown across the full map.',
+            },
             'When no area is selected, address dots can be shown across the full map.',
             'When an area is selected, the map centers on that area. If dots are turned on, only the dots in that area are shown.',
           ],
