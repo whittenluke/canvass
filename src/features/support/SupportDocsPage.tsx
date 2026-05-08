@@ -108,6 +108,7 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
           imageCaption: [
             'Open Admin Access from the top navigation to manage who can sign in and what role they have.',
             'From this page you can add users, edit users, and delete users.',
+            'Users must first be added here as Canvassers before they can be assigned areas.',
           ],
         },
         {
