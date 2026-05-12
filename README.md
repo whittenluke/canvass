@@ -68,7 +68,7 @@ Manual smoke checks to run each slice:
 - Email auth gate, sign-in/create-password, and password reset/recovery
 - Admin access panel add/edit/delete
 - Geofence load/create/edit/delete and assignee save
-- Address toggles for admin/canvasser and admin mark-all-in-geofence flow
+- Admin Dashboard tab: org-wide canvassed and petition ratios; contributor leaderboard (all time or last 30 days)
 
 ## PWA assets
 

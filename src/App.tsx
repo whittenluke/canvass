@@ -13,6 +13,8 @@ import { point } from '@turf/helpers'
 import { missingSupabaseConfig, supabase } from './lib/supabase'
 import type {
   AddressRow,
+  AdminDashboardContributorRow,
+  AdminDashboardEffortSummaryRow,
   AdminGeofenceListProgressRow,
   AdminGeofenceProgressRow,
   AdminMarkGeofenceResultRow,
@@ -130,7 +132,7 @@ function App() {
   const [errorMessage, setErrorMessage] = useState('')
   const [viewport, setViewport] = useState<ViewportBounds | null>(null)
   const [hitViewportLimit, setHitViewportLimit] = useState(false)
-  const [activeAdminView, setActiveAdminView] = useState<'map' | 'access'>('map')
+  const [activeAdminView, setActiveAdminView] = useState<'map' | 'access' | 'dashboard'>('map')
   const [geofences, setGeofences] = useState<GeofenceRow[]>([])
   const [selectedGeofenceId, setSelectedGeofenceId] = useState('')
   const [geofenceNameDraft, setGeofenceNameDraft] = useState('')
@@ -142,6 +144,15 @@ function App() {
   >(null)
   const [isAdminGeofenceOverviewLoading, setIsAdminGeofenceOverviewLoading] = useState(false)
   const [adminGeofenceOverviewError, setAdminGeofenceOverviewError] = useState('')
+  const [adminDashboardEffort, setAdminDashboardEffort] = useState<AdminDashboardEffortSummaryRow | null>(
+    null,
+  )
+  const [adminDashboardLeaderboard, setAdminDashboardLeaderboard] = useState<AdminDashboardContributorRow[]>(
+    [],
+  )
+  const [adminDashboardLoading, setAdminDashboardLoading] = useState(false)
+  const [adminDashboardError, setAdminDashboardError] = useState('')
+  const [adminDashboardLeaderboardRange, setAdminDashboardLeaderboardRange] = useState<'all' | '30d'>('all')
   const [geofenceMessage, setGeofenceMessage] = useState('')
   const [geofenceDeleteConfirmId, setGeofenceDeleteConfirmId] = useState<string | null>(null)
   const [isGeofenceDeleting, setIsGeofenceDeleting] = useState(false)
@@ -1126,6 +1137,90 @@ function App() {
     /* eslint-enable react-hooks/set-state-in-effect */
     // eslint-disable-next-line react-hooks/exhaustive-deps -- overview triggers on catalog id set only; run() reads latest geofences from closure when idsKey/role/selection changes
   }, [role, selectedGeofenceId, adminGeofenceIdsKey, supabase])
+
+  useEffect(() => {
+    if (role !== 'admin' || activeAdminView !== 'dashboard' || !supabase) {
+      return
+    }
+    let cancelled = false
+    const toNum = (v: unknown): number => {
+      if (typeof v === 'number' && Number.isFinite(v)) return v
+      if (typeof v === 'string' && v.trim() !== '') {
+        const n = Number(v)
+        return Number.isFinite(n) ? n : 0
+      }
+      return 0
+    }
+    const run = async () => {
+      setAdminDashboardLoading(true)
+      setAdminDashboardError('')
+      const pSince =
+        adminDashboardLeaderboardRange === '30d'
+          ? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+          : null
+      try {
+        const [sumRes, boardRes] = await Promise.all([
+          supabase.rpc('admin_dashboard_effort_summary'),
+          supabase.rpc('admin_dashboard_contributor_leaderboard', { p_since: pSince }),
+        ])
+        if (cancelled) return
+        if (sumRes.error) {
+          setAdminDashboardError(sumRes.error.message)
+          setAdminDashboardEffort(null)
+        } else {
+          const raw = Array.isArray(sumRes.data) ? sumRes.data[0] : null
+          if (raw && typeof raw === 'object') {
+            const o = raw as Record<string, unknown>
+            setAdminDashboardEffort({
+              total_addresses_in_areas: toNum(o.total_addresses_in_areas),
+              canvassed_count: toNum(o.canvassed_count),
+              petition_signed_count: toNum(o.petition_signed_count),
+            })
+          } else {
+            setAdminDashboardEffort({
+              total_addresses_in_areas: 0,
+              canvassed_count: 0,
+              petition_signed_count: 0,
+            })
+          }
+        }
+        if (boardRes.error) {
+          setAdminDashboardError((prev) =>
+            prev ? `${prev}; ${boardRes.error.message}` : boardRes.error.message,
+          )
+          setAdminDashboardLeaderboard([])
+        } else {
+          const rows = Array.isArray(boardRes.data) ? boardRes.data : []
+          setAdminDashboardLeaderboard(
+            rows.map((r) => {
+              const o = r as Record<string, unknown>
+              return {
+                actor_id: String(o.actor_id ?? ''),
+                actor_email: String(o.actor_email ?? ''),
+                actor_role: String(o.actor_role ?? ''),
+                canvassed_marks: toNum(o.canvassed_marks),
+                petition_marks: toNum(o.petition_marks),
+              }
+            }),
+          )
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setAdminDashboardEffort(null)
+          setAdminDashboardLeaderboard([])
+          setAdminDashboardError(e instanceof Error ? e.message : 'Failed to load dashboard')
+        }
+      } finally {
+        if (!cancelled) {
+          setAdminDashboardLoading(false)
+        }
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [role, activeAdminView, supabase, adminDashboardLeaderboardRange])
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- reset panel/dialog state when fence changes */
@@ -2281,9 +2376,22 @@ function App() {
             <button
               type="button"
               className={activeAdminView === 'map' ? 'view-tab active' : 'view-tab'}
-              onClick={() => setActiveAdminView('map')}
+              onClick={() => {
+                setGeofenceDeleteConfirmId(null)
+                setActiveAdminView('map')
+              }}
             >
               Map
+            </button>
+            <button
+              type="button"
+              className={activeAdminView === 'dashboard' ? 'view-tab active' : 'view-tab'}
+              onClick={() => {
+                setGeofenceDeleteConfirmId(null)
+                setActiveAdminView('dashboard')
+              }}
+            >
+              Dashboard
             </button>
             <button
               type="button"
@@ -3512,7 +3620,7 @@ function App() {
                     )}
                   </div>
                   <label>
-                    Name
+                    Area name
                     <input
                       type="text"
                       value={geofenceNameDraft}
@@ -3520,7 +3628,7 @@ function App() {
                     />
                   </label>
                   <label>
-                    Assigned email
+                    Assigned canvasser
                     <div className="geofence-assignee-picker" ref={geofenceAssigneePickerRef}>
                       <button
                         type="button"
@@ -3808,6 +3916,111 @@ function App() {
           )}
         </section>
       ) : null}
+      {role === 'admin' && activeAdminView === 'dashboard' && (
+        <section className="admin-panel admin-dashboard" aria-label="Canvassing effort dashboard">
+          <div className="admin-panel-header">
+            <div>
+              <h2>Dashboard</h2>
+            </div>
+          </div>
+          {adminDashboardError ? <p className="error-banner">{adminDashboardError}</p> : null}
+          {adminDashboardLoading ? (
+            <p className="access-message">Loading dashboard…</p>
+          ) : adminDashboardEffort ? (
+            <>
+              <div className="admin-dashboard-metrics">
+                <div className="admin-dashboard-metric-card">
+                  <h3 className="admin-dashboard-metric-title">Canvassed</h3>
+                  <p className="admin-dashboard-metric-value">
+                    <strong>{adminDashboardEffort.canvassed_count}</strong>
+                    <span className="admin-dashboard-metric-sep"> / </span>
+                    {adminDashboardEffort.total_addresses_in_areas}
+                  </p>
+                  <p className="admin-dashboard-metric-sub">
+                    {adminDashboardEffort.total_addresses_in_areas === 0
+                      ? '—'
+                      : `${Math.round(
+                          (adminDashboardEffort.canvassed_count /
+                            adminDashboardEffort.total_addresses_in_areas) *
+                            100,
+                        )}%`}
+                  </p>
+                </div>
+                <div className="admin-dashboard-metric-card admin-dashboard-metric-card--petition">
+                  <h3 className="admin-dashboard-metric-title">Petition signed</h3>
+                  <p className="admin-dashboard-metric-value">
+                    <strong>{adminDashboardEffort.petition_signed_count}</strong>
+                    <span className="admin-dashboard-metric-sep"> / </span>
+                    {adminDashboardEffort.total_addresses_in_areas}
+                  </p>
+                  <p className="admin-dashboard-metric-sub">
+                    {adminDashboardEffort.total_addresses_in_areas === 0
+                      ? '—'
+                      : `${Math.round(
+                          (adminDashboardEffort.petition_signed_count /
+                            adminDashboardEffort.total_addresses_in_areas) *
+                            100,
+                        )}%`}
+                  </p>
+                </div>
+              </div>
+              <div className="admin-dashboard-leaderboard-head">
+                <h3 className="admin-dashboard-leaderboard-title">Contributor leaderboard</h3>
+                <div className="admin-dashboard-range" role="group" aria-label="Leaderboard time range">
+                  <button
+                    type="button"
+                    className={
+                      adminDashboardLeaderboardRange === 'all' ? 'view-tab active' : 'view-tab'
+                    }
+                    onClick={() => setAdminDashboardLeaderboardRange('all')}
+                  >
+                    All time
+                  </button>
+                  <button
+                    type="button"
+                    className={
+                      adminDashboardLeaderboardRange === '30d' ? 'view-tab active' : 'view-tab'
+                    }
+                    onClick={() => setAdminDashboardLeaderboardRange('30d')}
+                  >
+                    Last 30 days
+                  </button>
+                </div>
+              </div>
+              <div className="profiles-table-wrap">
+                <table className="profiles-table admin-dashboard-leaderboard-table">
+                  <thead>
+                    <tr>
+                      <th>Contributor</th>
+                      <th>Role</th>
+                      <th>Canvassed</th>
+                      <th>Signatures</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminDashboardLeaderboard.length === 0 ? (
+                      <tr>
+                        <td colSpan={4}>No activity recorded yet for this range.</td>
+                      </tr>
+                    ) : (
+                      adminDashboardLeaderboard.map((row) => (
+                        <tr key={row.actor_id}>
+                          <td data-label="Contributor">{row.actor_email || row.actor_id}</td>
+                          <td data-label="Role">{row.actor_role}</td>
+                          <td data-label="Canvassed">{row.canvassed_marks}</td>
+                          <td data-label="Signatures">{row.petition_marks}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <p className="access-message">No summary data.</p>
+          )}
+        </section>
+      )}
       {role === 'admin' && activeAdminView === 'access' && (
         <section className="admin-panel">
           <div className="admin-panel-header">

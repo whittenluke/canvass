@@ -84,3 +84,19 @@ export type StreetAddressGroup = {
   heading: string
   rows: AddressRow[]
 }
+
+/** Row from `admin_dashboard_effort_summary` (denominator = distinct addresses in any geofence). */
+export type AdminDashboardEffortSummaryRow = {
+  total_addresses_in_areas: number
+  canvassed_count: number
+  petition_signed_count: number
+}
+
+/** Row from `admin_dashboard_contributor_leaderboard`. */
+export type AdminDashboardContributorRow = {
+  actor_id: string
+  actor_email: string
+  actor_role: string
+  canvassed_marks: number
+  petition_marks: number
+}

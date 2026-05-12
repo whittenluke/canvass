@@ -1420,6 +1420,87 @@
   align-self: flex-start;
 }
 
+.admin-panel.admin-dashboard {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.admin-dashboard-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 0.25rem;
+}
+
+.admin-dashboard-metric-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.admin-dashboard-metric-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #486581;
+}
+
+.admin-dashboard-metric-value {
+  margin: 0;
+  font-size: 1.15rem;
+  color: #102a43;
+}
+
+.admin-dashboard-metric-value strong {
+  color: #334e68;
+}
+
+.admin-dashboard-metric-sep {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.admin-dashboard-metric-sub {
+  margin: 0.35rem 0 0;
+  font-size: 0.9rem;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.admin-dashboard-metric-card--petition .admin-dashboard-metric-sub {
+  color: #9a3412;
+}
+
+.admin-dashboard-leaderboard-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 1rem 0 0.5rem;
+}
+
+.admin-dashboard-leaderboard-title {
+  margin: 0;
+  font-size: 1rem;
+  color: #102a43;
+}
+
+.admin-dashboard-range {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.admin-dashboard-range .view-tab {
+  font-size: 0.82rem;
+  padding: 0.35rem 0.55rem;
+}
+
 .access-form {
   display: grid;
   grid-template-columns: 1.4fr 0.8fr auto;
