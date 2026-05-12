@@ -6,6 +6,7 @@ export type AddressRow = {
   lat: number
   long: number
   canvassed: boolean
+  signed_petition: boolean
 }
 
 export type AccessRow = {
@@ -42,6 +43,8 @@ export type GeofenceProgress = {
   total: number
   canvassed: number
   remaining: number
+  petitionSigned: number
+  petitionRemaining: number
 }
 
 export type SupabaseClientNonNull = NonNullable<typeof supabase>
@@ -52,10 +55,18 @@ export type AdminMarkGeofenceResultRow = {
   total_count: number
 }
 
+export type AdminMarkGeofenceSignedPetitionResultRow = {
+  updated_count: number
+  already_signed: number
+  total_count: number
+}
+
 export type AdminGeofenceProgressRow = {
   total_count: number
   canvassed_count: number
   remaining_count: number
+  petition_signed_count: number
+  petition_remaining_count: number
 }
 
 /** One row per geofence from `admin_list_geofence_progress` (or client fallback). */
@@ -64,6 +75,8 @@ export type AdminGeofenceListProgressRow = {
   total_count: number
   canvassed_count: number
   remaining_count: number
+  petition_signed_count: number
+  petition_remaining_count: number
 }
 
 export type StreetAddressGroup = {

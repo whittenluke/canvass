@@ -20,7 +20,7 @@ Set these in your local environment:
 
 ## Supabase migrations and RPC coverage
 
-The app relies on Supabase RPCs called from `src/App.tsx`. To prevent runtime failures in fresh environments, every RPC used by the app should be represented by SQL in `supabase/migrations`.
+The app relies on Supabase RPCs called from `src/**/*.ts` and `src/**/*.tsx`. To prevent runtime failures in fresh environments, every RPC used by the app should be represented by SQL in `supabase/migrations`.
 
 Run this check:
 
@@ -30,7 +30,7 @@ npm run check:rpc-coverage
 
 What it does:
 
-- Reads RPC calls in `src/App.tsx`
+- Reads RPC calls across `src/**/*.ts` and `src/**/*.tsx`
 - Reads function definitions in `supabase/migrations/*.sql`
 - Fails with a missing-function list when an app RPC is not migration-backed
 

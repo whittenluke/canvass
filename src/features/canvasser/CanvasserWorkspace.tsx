@@ -18,7 +18,7 @@ export function CollapsibleStreetBlock({
   nameClassName: string
   metaClassName: string
   heading: string
-  meta: string
+  meta: ReactNode
   children: ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -30,7 +30,7 @@ export function CollapsibleStreetBlock({
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
-        <span className="collapsible-street-heading-group">
+        <span className="collapsible-street-summary-leading">
           <span className={nameClassName}>{heading}</span>
           <span className="collapsible-street-chevron" aria-hidden="true">
             {open ? '▲' : '▼'}
@@ -50,7 +50,8 @@ export function NearbyAddressSheet({
   geofences,
   assignedGeofenceIdSet,
   onClose,
-  onToggle,
+  onToggleCanvassed,
+  onToggleSignedPetition,
 }: {
   memberIds: string[]
   addresses: AddressRow[]
@@ -58,7 +59,8 @@ export function NearbyAddressSheet({
   geofences: GeofenceRow[]
   assignedGeofenceIdSet: Set<string>
   onClose: () => void
-  onToggle: (row: AddressRow) => void
+  onToggleCanvassed: (row: AddressRow) => void | Promise<void>
+  onToggleSignedPetition: (row: AddressRow) => void | Promise<void>
 }) {
   const rows = useMemo(
     () => memberIds.map((id) => addresses.find((a) => a.id === id)).filter((a): a is AddressRow => a != null),
@@ -75,47 +77,87 @@ export function NearbyAddressSheet({
         </div>
         <p className="nearby-sheet-subtitle">{rows.length} at this spot, grouped by street. Mark each unit as you go.</p>
         <div className="nearby-sheet-streets">
-          {sheetStreetGroups.map((group, streetIndex) => (
-            <CollapsibleStreetBlock
-              key={group.sortKey}
-              blockClassName="nearby-sheet-street"
-              defaultOpen={sheetStreetGroups.length <= 4 || streetIndex < 2}
-              summaryClassName="nearby-sheet-street-summary"
-              nameClassName="nearby-sheet-street-name"
-              metaClassName="nearby-sheet-street-meta"
-              heading={group.heading}
-              meta={`${group.rows.filter((a) => a.canvassed).length}/${group.rows.length} done`}
-            >
-              <ul className="nearby-sheet-list">
-                {group.rows.map((address) => {
-                  const canToggle =
-                    role === 'admin' ||
-                    (role === 'canvasser' && addressInAssignedGeofences(address, geofences, assignedGeofenceIdSet))
-                  return (
-                    <li key={address.id} className="nearby-sheet-row">
-                      <div className="nearby-sheet-row-text">
-                        <span className="nearby-sheet-address">{address.full_address}</span>
-                        <span className={`nearby-sheet-pill ${address.canvassed ? 'done' : 'todo'}`}>
-                          {address.canvassed ? 'Canvassed' : 'Not canvassed'}
-                        </span>
-                      </div>
-                      <button type="button" className="nearby-sheet-action" disabled={!canToggle} onClick={() => void onToggle(address)}>
-                        {role === 'admin'
-                          ? address.canvassed
-                            ? 'Mark uncanvassed'
-                            : 'Mark canvassed'
-                          : canToggle
-                            ? address.canvassed
-                              ? 'Mark uncanvassed'
-                              : 'Mark canvassed'
-                            : 'Outside your areas'}
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            </CollapsibleStreetBlock>
-          ))}
+          {sheetStreetGroups.map((group, streetIndex) => {
+            const n = group.rows.length
+            const c = group.rows.filter((a) => a.canvassed).length
+            const p = group.rows.filter((a) => a.signed_petition).length
+            return (
+              <CollapsibleStreetBlock
+                key={group.sortKey}
+                blockClassName="nearby-sheet-street"
+                defaultOpen={sheetStreetGroups.length <= 4 || streetIndex < 2}
+                summaryClassName="nearby-sheet-street-summary"
+                nameClassName="nearby-sheet-street-name"
+                metaClassName="nearby-sheet-street-meta"
+                heading={group.heading}
+                meta={
+                  <span className="street-block-stats" aria-label={`${c} of ${n} canvassed, ${p} of ${n} signed`}>
+                    <span className="street-block-stat-row">
+                      <span className="street-block-stat-label">Canvassed</span>
+                      <span className="street-block-stat-value">
+                        <strong>{c}</strong>
+                        <span className="street-block-stat-slash">/</span>
+                        <span className="street-block-stat-den">{n}</span>
+                      </span>
+                    </span>
+                    <span className="street-block-stat-row">
+                      <span className="street-block-stat-label">Signed</span>
+                      <span className="street-block-stat-value">
+                        <strong>{p}</strong>
+                        <span className="street-block-stat-slash">/</span>
+                        <span className="street-block-stat-den">{n}</span>
+                      </span>
+                    </span>
+                  </span>
+                }
+              >
+                <ul className="nearby-sheet-list">
+                  {group.rows.map((address) => {
+                    const canToggle =
+                      role === 'admin' ||
+                      (role === 'canvasser' && addressInAssignedGeofences(address, geofences, assignedGeofenceIdSet))
+                    return (
+                      <li key={address.id} className="nearby-sheet-row">
+                        <div className="nearby-sheet-row-text">
+                          <span className="nearby-sheet-address">{address.full_address}</span>
+                          <span className={`nearby-sheet-pill ${address.canvassed ? 'done' : 'todo'}`}>
+                            {address.canvassed ? 'Canvassed' : 'Not canvassed'}
+                          </span>
+                          <span className={`nearby-sheet-pill ${address.signed_petition ? 'petition-signed' : 'petition-open'}`}>
+                            {address.signed_petition ? 'Petition signed' : 'Petition not signed'}
+                          </span>
+                        </div>
+                        <div className="nearby-sheet-row-actions">
+                          <button type="button" className="nearby-sheet-action" disabled={!canToggle} onClick={() => void onToggleCanvassed(address)}>
+                            {role === 'admin'
+                              ? address.canvassed
+                                ? 'Mark uncanvassed'
+                                : 'Mark canvassed'
+                              : canToggle
+                                ? address.canvassed
+                                  ? 'Mark uncanvassed'
+                                  : 'Mark canvassed'
+                                : 'Outside your areas'}
+                          </button>
+                          <button type="button" className="nearby-sheet-action" disabled={!canToggle} onClick={() => void onToggleSignedPetition(address)}>
+                            {role === 'admin'
+                              ? address.signed_petition
+                                ? 'Clear petition'
+                                : 'Signed petition'
+                              : canToggle
+                                ? address.signed_petition
+                                  ? 'Clear petition'
+                                  : 'Signed petition'
+                                : 'Outside your areas'}
+                          </button>
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </CollapsibleStreetBlock>
+            )
+          })}
         </div>
       </div>
     </div>

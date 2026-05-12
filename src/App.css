@@ -497,35 +497,104 @@
   color: #102a43;
 }
 
-.canvasser-list-progress {
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: #334e68;
-}
-
 .canvasser-list-progress-wrap {
-  margin: 0 0 0.6rem;
+  margin: 0 0 1rem;
 }
 
-.canvasser-progress-track {
-  height: 8px;
+.canvasser-list-progress-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  padding: 0.75rem 0.85rem 0.85rem;
+}
+
+.canvasser-list-progress-scope {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: #64748b;
+}
+
+.canvasser-list-progress-scope strong {
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.canvasser-list-metric {
+  margin: 0;
+}
+
+.canvasser-list-metric--petition {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.canvasser-list-metric-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.2rem;
+}
+
+.canvasser-list-metric-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6d28d9;
+}
+
+.canvasser-list-metric--petition .canvasser-list-metric-label {
+  color: #9a3412;
+}
+
+.canvasser-list-metric-pct {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #5b21b6;
+  font-variant-numeric: tabular-nums;
+}
+
+.canvasser-list-metric--petition .canvasser-list-metric-pct {
+  color: #c2410c;
+}
+
+.canvasser-list-metric-caption {
+  margin: 0 0 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+.canvasser-list-metric-rail {
+  height: 10px;
   border-radius: 999px;
-  background: #e2e8f0;
+  background: #faf5ff;
+  box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.14);
   overflow: hidden;
 }
 
-.canvasser-progress-fill {
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #22c55e, #16a34a);
-  transition: width 0.2s ease;
+.canvasser-list-metric-rail--petition {
+  background: #fffbeb;
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.12);
 }
 
-.canvasser-list-metrics-line {
-  margin: 0.35rem 0 0;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: #475569;
+.canvasser-list-metric-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.22s ease;
+}
+
+.canvasser-list-metric-fill--canvassed {
+  background: linear-gradient(90deg, #a78bfa, #7c3aed);
+}
+
+.canvasser-list-metric-fill--petition {
+  background: linear-gradient(90deg, #fb923c, #f97316);
 }
 
 .canvasser-list-lead {
@@ -556,41 +625,23 @@
 .canvasser-street-block {
   flex-shrink: 0;
   border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #fff;
   overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-.canvasser-street-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  width: 100%;
-  min-height: 2.75rem;
-  margin: 0;
-  padding: 0.5rem 0.65rem;
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: #102a43;
-  text-align: left;
-  border: 0;
-  flex-shrink: 0;
-  background: linear-gradient(180deg, #f1f5f9 0%, #e8eef4 100%);
-}
-
-.collapsible-street-heading-group {
-  display: flex;
+.collapsible-street-summary-leading {
+  display: inline-flex;
   align-items: center;
   gap: 0.35rem;
   min-width: 0;
-  flex: 1;
+  max-width: min(100%, 18rem);
 }
 
-.collapsible-street-heading-group > span:first-child {
-  flex: 1;
+.collapsible-street-summary-leading .canvasser-street-name,
+.collapsible-street-summary-leading .nearby-sheet-street-name {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -599,28 +650,103 @@
 
 .collapsible-street-chevron {
   flex-shrink: 0;
-  font-size: 0.58rem;
+  font-size: 0.55rem;
   line-height: 1;
-  color: #5b21b6;
-  opacity: 0.9;
+  color: #64748b;
+  opacity: 0.95;
+  translate: 0 1px;
+}
+
+.street-block-stats {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.street-block-stat-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  min-width: 7.5rem;
+}
+
+.street-block-stat-label {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.street-block-stat-value {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.street-block-stat-value strong {
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.street-block-stat-slash {
+  margin: 0 0.05em;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.street-block-stat-den {
+  font-weight: 600;
+  color: #64748b;
+}
+
+.canvasser-street-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+  width: 100%;
+  min-height: 2.85rem;
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #0f172a;
+  text-align: left;
+  border: 0;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  transition: background 0.15s ease;
+}
+
+.canvasser-street-summary:hover {
+  background: linear-gradient(180deg, #f1f5f9 0%, #e8eef4 100%);
+}
+
+.canvasser-street-summary:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+}
+
+.canvasser-street-name {
+  text-align: left;
+  letter-spacing: 0.02em;
+}
+
+.canvasser-street-count {
+  flex-shrink: 0;
+  text-align: right;
 }
 
 .collapsible-street-panel {
   flex-shrink: 0;
   min-height: min-content;
   border-top: 1px solid #e2e8f0;
-}
-
-.canvasser-street-name {
-  text-align: left;
-}
-
-.canvasser-street-count {
-  flex-shrink: 0;
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: #334e68;
-  white-space: nowrap;
 }
 
 .canvasser-street-ul {
@@ -637,25 +763,50 @@
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  gap: 0.45rem;
-  padding: 0.55rem 0.65rem;
+  gap: 0.5rem;
+  padding: 0.65rem 0.7rem;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  background: #f8fafc;
+  background: #fff;
+  box-shadow: 0 1px 1px rgba(15, 23, 42, 0.03);
 }
 
-.canvasser-list-row-main {
+.canvasser-list-row-actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
   gap: 0.4rem;
+  align-items: stretch;
+}
+
+.canvasser-list-action {
+  border: 0;
+  border-radius: 8px;
+  background: #1e3a5f;
+  color: #fff;
+  padding: 0.42rem 0.7rem;
+  font-weight: 600;
+  font-size: 0.8rem;
+  cursor: pointer;
+  flex: 1 1 auto;
+  min-width: 8.5rem;
+  transition: background 0.12s ease;
+}
+
+.canvasser-list-action:hover:not(:disabled) {
+  background: #152a45;
+}
+
+.canvasser-list-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .canvasser-list-address {
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   font-weight: 600;
   color: #0f172a;
-  flex: 1;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
   min-width: 0;
 }
 
@@ -898,6 +1049,13 @@
   font-weight: 600;
 }
 
+.popup-address-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
 /* Geofence name tags (Leaflet permanent tooltips centered on polygons) */
 .leaflet-tooltip.geofence-map-label {
   background: rgba(255, 255, 255, 0.96);
@@ -951,6 +1109,10 @@
   filter: drop-shadow(0 0 5px rgba(37, 99, 235, 0.85));
 }
 
+.address-dot-visual--open.address-dot-visual--open-petition {
+  filter: drop-shadow(0 0 5px rgba(249, 115, 22, 0.92));
+}
+
 .address-cluster-leaflet-marker {
   background: transparent !important;
   border: none !important;
@@ -981,6 +1143,10 @@
 
 .address-cluster-hit__badge--all-canvassed {
   background: #2563eb;
+}
+
+.address-cluster-hit__badge--all-petition {
+  background: #f97316;
 }
 
 .nearby-sheet-backdrop {
@@ -1074,22 +1240,32 @@
 
 .nearby-sheet-street-summary {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.65rem;
   width: 100%;
-  min-height: 2.5rem;
+  min-height: 2.65rem;
   margin: 0;
-  padding: 0.45rem 0.6rem;
+  padding: 0.5rem 0.65rem;
   cursor: pointer;
   font: inherit;
   font-weight: 700;
   font-size: 0.86rem;
-  color: #102a43;
+  color: #0f172a;
   text-align: left;
   border: 0;
   flex-shrink: 0;
-  background: #eef2f6;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  transition: background 0.12s ease;
+}
+
+.nearby-sheet-street-summary:hover {
+  background: linear-gradient(180deg, #f1f5f9 0%, #e8eef4 100%);
+}
+
+.nearby-sheet-street-summary:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
 }
 
 .nearby-sheet-street-name {
@@ -1098,10 +1274,7 @@
 
 .nearby-sheet-street-meta {
   flex-shrink: 0;
-  font-size: 0.74rem;
-  font-weight: 700;
-  color: #334e68;
-  white-space: nowrap;
+  text-align: right;
 }
 
 .nearby-sheet-list {
@@ -1157,6 +1330,23 @@
 .nearby-sheet-pill.todo {
   background: #ffedd5;
   color: #9a3412;
+}
+
+.nearby-sheet-pill.petition-signed {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.nearby-sheet-pill.petition-open {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.nearby-sheet-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: flex-start;
 }
 
 .nearby-sheet-action {
@@ -1530,6 +1720,7 @@
 .geofence-panel {
   grid-column: 2;
   grid-row: 1;
+  min-width: 0;
   min-height: 0;
   max-height: 100%;
   overflow: auto;
@@ -1577,14 +1768,6 @@
 
 .admin-geofence-expandable {
   min-height: 0;
-}
-
-.admin-geofence-header-metric {
-  margin-right: auto;
-  margin-left: 0.15rem;
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: #486581;
 }
 
 .admin-geofence-back-row {
@@ -1706,36 +1889,92 @@
   outline-offset: 2px;
 }
 
-.admin-geofence-overview-row-main {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
+.admin-geofence-overview-row-head {
   width: 100%;
+  margin-bottom: 0.15rem;
 }
 
 .admin-geofence-overview-row-name {
+  display: block;
   font-weight: 700;
   font-size: 0.84rem;
+  color: #0f172a;
   min-width: 0;
-  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.admin-geofence-overview-row-meta {
-  flex-shrink: 0;
+.admin-geofence-overview-metrics {
   display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: #334155;
+  flex-direction: column;
+  gap: 0.42rem;
+  width: 100%;
+  min-width: 0;
 }
 
-.admin-geofence-overview-row-bar {
-  height: 5px;
+.admin-geofence-overview-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.admin-geofence-overview-metric__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.admin-geofence-overview-metric__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #475569;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.admin-geofence-overview-metric__stat {
+  flex-shrink: 0;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #334155;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-geofence-overview-metric__track {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 6px;
+  border-radius: 999px;
+  background: #eff6ff;
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.16);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.admin-geofence-overview-metric--petition .admin-geofence-overview-metric__track {
+  background: #fffbeb;
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.12);
+}
+
+.admin-geofence-overview-metric__fill {
+  display: block;
+  height: 100%;
+  min-height: 6px;
+  border-radius: 999px;
+  box-sizing: border-box;
+  transition: width 160ms ease;
+}
+
+.admin-geofence-overview-metric__fill--canvassed {
+  background: linear-gradient(90deg, #3b82f6, #2563eb);
+}
+
+.admin-geofence-overview-metric__fill--petition {
+  background: linear-gradient(90deg, #fb923c, #f97316);
 }
 
 .canvasser-areas-strip-row {
@@ -1770,6 +2009,23 @@
   white-space: nowrap;
 }
 
+.canvasser-areas-strip-meta--stacked {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.08rem;
+  line-height: 1.22;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+}
+
+.canvasser-areas-strip-meta-line {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #4338ca;
+}
+
 .canvasser-areas-strip-chevron {
   flex-shrink: 0;
   font-size: 0.6rem;
@@ -1782,9 +2038,26 @@
 .canvasser-areas-strip-bar {
   height: 5px;
   border-radius: 999px;
-  background: #ede9fe;
+  background: #faf5ff;
+  box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.14);
   margin-top: 0.35rem;
   overflow: hidden;
+}
+
+.canvasser-areas-strip-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 0.35rem;
+}
+
+.canvasser-areas-strip-bar:first-child {
+  margin-top: 0;
+}
+
+.canvasser-areas-strip-bar--petition {
+  background: #fffbeb;
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.12);
 }
 
 .canvasser-areas-strip-bar-fill {
@@ -1792,6 +2065,10 @@
   border-radius: 999px;
   background: linear-gradient(90deg, #a78bfa, #7c3aed);
   transition: width 0.2s ease;
+}
+
+.canvasser-areas-strip-bar-fill--petition {
+  background: linear-gradient(90deg, #fb923c, #f97316);
 }
 
 .canvasser-areas-expandable {
@@ -1835,19 +2112,36 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
 }
 
 .canvasser-areas-panel .progress-bar-track {
-  background: #ede9fe;
+  background: #faf5ff;
+  box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.14);
 }
 
-.canvasser-areas-progress-fill {
-  background: linear-gradient(90deg, #a78bfa, #7c3aed);
-  transition: width 180ms ease;
+.canvasser-areas-panel .canvasser-progress-headline--secondary ~ .progress-bar-track {
+  background: #fffbeb;
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.12);
+}
+
+.canvasser-area-details-body .progress-bar-track.canvasser-area-breakdown-bar {
+  height: 6px;
+  background: #faf5ff;
+  box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.12);
+}
+
+.canvasser-area-details-body .progress-bar-track.canvasser-area-breakdown-bar--petition {
+  height: 6px;
+  background: #fffbeb;
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.12);
+}
+
+.canvasser-progress-headline--secondary {
+  margin-top: 0.45rem;
 }
 
 .canvasser-area-breakdown {
   margin-top: 0.65rem;
 }
 
-.canvasser-area-breakdown-heading {
+.canvasser-panel-section-title {
   margin: 0 0 0.45rem;
   font-size: 0.72rem;
   font-weight: 800;
@@ -1856,79 +2150,270 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
   color: #6d28d9;
 }
 
-.canvasser-area-focus-option {
-  display: block;
-  width: 100%;
-  margin: 0;
-  padding: 0.45rem 0.5rem;
+.canvasser-panel-section-title--by-area {
+  margin-top: 0.85rem;
+}
+
+.canvasser-area-details {
   border: 1px solid #ddd6fe;
   border-radius: 10px;
   background: #faf5ff;
+  overflow: hidden;
+}
+
+.canvasser-area-details--map-focus {
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.22);
+}
+
+.canvasser-area-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0.55rem;
   cursor: pointer;
-  text-align: left;
+  list-style: none;
   font: inherit;
   color: inherit;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.canvasser-area-focus-option:hover {
-  background: #f5f3ff;
-  border-color: #c4b5fd;
+.canvasser-area-summary::-webkit-details-marker {
+  display: none;
 }
 
-.canvasser-area-focus-option:focus-visible {
-  outline: 2px solid #7c3aed;
-  outline-offset: 2px;
+.canvasser-area-summary:hover {
+  background: rgba(255, 255, 255, 0.35);
 }
 
-.canvasser-area-focus-option--active {
-  border-color: #7c3aed;
-  background: #ede9fe;
-  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.25);
+.canvasser-area-summary-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.84rem;
+  font-weight: 800;
+  color: #312e81;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.canvasser-area-focus-option .canvasser-area-breakdown-empty {
+.canvasser-area-summary-stats {
+  display: none;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.65rem;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (min-width: 520px) {
+  .canvasser-area-summary-stats {
+    display: flex;
+  }
+}
+
+.canvasser-area-summary-pair {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.06rem;
+}
+
+.canvasser-area-summary-pair-label {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #7c73a8;
+}
+
+.canvasser-area-summary-pair-val {
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: #1e1b4b;
+}
+
+.canvasser-area-summary-chevron {
+  flex-shrink: 0;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-left: 0.1rem;
+  border-right: 2px solid #6d28d9;
+  border-bottom: 2px solid #6d28d9;
+  transform: rotate(45deg);
+  translate: 0 -2px;
+  opacity: 0.85;
+  transition: transform 0.18s ease;
+}
+
+.canvasser-area-details[open] .canvasser-area-summary-chevron {
+  transform: rotate(225deg);
+  translate: 0 1px;
+}
+
+.canvasser-area-details-body {
+  padding: 0 0.55rem 0.55rem;
+  border-top: 1px solid #e9d5ff;
+  background: #fff;
+}
+
+.canvasser-area-details-body .canvasser-area-breakdown-metric:first-child .progress-headline {
   margin-top: 0.35rem;
 }
 
-.canvasser-show-all-areas-btn {
-  border: 0;
-  padding: 0.35rem 0.65rem;
+.canvasser-area-map-focus-btn {
+  display: block;
+  width: 100%;
+  margin-top: 0.55rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid #c4b5fd;
   border-radius: 8px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  cursor: pointer;
   background: #ede9fe;
   color: #5b21b6;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
 }
 
-.canvasser-show-all-areas-btn:hover {
+.canvasser-area-map-focus-btn:hover:not(:disabled) {
   background: #ddd6fe;
+  border-color: #a78bfa;
 }
 
-.canvasser-show-all-areas-btn:focus-visible {
+.canvasser-area-map-focus-btn:disabled {
+  opacity: 0.75;
+  cursor: default;
+}
+
+.canvasser-area-map-focus-btn:focus-visible {
   outline: 2px solid #7c3aed;
   outline-offset: 2px;
 }
 
-.canvasser-list-focus-banner {
+.canvasser-area-details-body .canvasser-area-breakdown-empty {
+  margin: 0.45rem 0 0.15rem;
+}
+
+.canvasser-list-area-picker {
+  position: relative;
+  z-index: 5;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+  margin: 0 0 0.75rem;
+}
+
+.canvasser-list-area-picker-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #5b21b6;
+}
+
+.canvasser-list-area-picker-trigger {
+  display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  margin: 0 0 0.65rem;
-  padding: 0.45rem 0.55rem;
+  width: 100%;
+  max-width: 100%;
+  min-height: 48px;
+  padding: 0.55rem 0.65rem;
   border-radius: 10px;
-  background: #faf5ff;
-  border: 1px solid #e9d5ff;
+  border: 1px solid #c4b5fd;
+  background: #fff;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1e1b4b;
+  cursor: pointer;
+  box-sizing: border-box;
+  text-align: left;
 }
 
-.canvasser-list-focus-banner-label {
-  font-size: 0.82rem;
-  font-weight: 700;
+.canvasser-list-area-picker-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvasser-list-area-picker-chevron {
+  flex-shrink: 0;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.15rem;
+  border-right: 2px solid #6d28d9;
+  border-bottom: 2px solid #6d28d9;
+  transform: rotate(45deg);
+  translate: 0 -2px;
+  opacity: 0.85;
+  transition: transform 0.18s ease;
+}
+
+.canvasser-list-area-picker-trigger[aria-expanded='true'] .canvasser-list-area-picker-chevron {
+  transform: rotate(225deg);
+  translate: 0 1px;
+}
+
+.canvasser-list-area-picker-trigger:focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 2px;
+}
+
+.canvasser-list-area-picker-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  margin: 0;
+  padding: 0.35rem 0;
+  list-style: none;
+  max-height: min(50vh, 320px);
+  overflow-y: auto;
+  border-radius: 12px;
+  border: 1px solid #e9d5ff;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(30, 27, 75, 0.12);
+  box-sizing: border-box;
+}
+
+.canvasser-list-area-picker-menu li {
+  margin: 0;
+  padding: 0;
+}
+
+.canvasser-list-area-picker-option {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  padding: 0.65rem 1rem;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #1e1b4b;
+  text-align: left;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.canvasser-list-area-picker-option:hover,
+.canvasser-list-area-picker-option:focus-visible {
+  background: #f5f3ff;
+  outline: none;
+}
+
+.canvasser-list-area-picker-option.is-active {
+  background: #ede9fe;
   color: #5b21b6;
 }
 
@@ -1952,34 +2437,16 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
   margin: 0;
 }
 
-.canvasser-area-breakdown-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.25rem;
+.canvasser-area-breakdown-metric {
+  margin: 0;
 }
 
-.canvasser-area-breakdown-name {
-  font-size: 0.84rem;
-  font-weight: 700;
-  color: #312e81;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.canvasser-area-breakdown-metric .progress-headline {
+  margin-bottom: 0.28rem;
 }
 
-.canvasser-area-breakdown-count {
-  flex-shrink: 0;
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: #486581;
-}
-
-.canvasser-area-breakdown-pct {
-  font-weight: 600;
-  color: #64748b;
+.canvasser-area-breakdown-metric .progress-subline {
+  margin: 0 0 0.32rem;
 }
 
 .canvasser-area-breakdown-bar {
@@ -2010,6 +2477,12 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
 
 .canvasser-areas-panel .progress-headline strong {
   color: #5b21b6;
+}
+
+.canvasser-areas-panel .progress-subline {
+  margin: 0.05rem 0 0.38rem;
+  color: #6d28d9;
+  font-weight: 600;
 }
 
 .canvasser-areas-panel .metric-card.canvasser-areas-metric {
@@ -2339,6 +2812,83 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
   margin: 0 0 0.55rem;
 }
 
+.admin-geofence-dual-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.admin-geofence-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.admin-geofence-metric__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.admin-geofence-metric__title {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #334155;
+  letter-spacing: 0.01em;
+}
+
+.admin-geofence-metric__percent {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #0f172a;
+  flex-shrink: 0;
+}
+
+.admin-geofence-metric__track {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 10px;
+  border-radius: 999px;
+  background: #eff6ff;
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.16);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.admin-geofence-metric__fill {
+  display: block;
+  height: 100%;
+  min-height: 10px;
+  border-radius: 999px;
+  box-sizing: border-box;
+  transition: width 180ms ease;
+}
+
+.admin-geofence-metric__fill--canvassed {
+  background: linear-gradient(90deg, #3b82f6, #2563eb);
+}
+
+.admin-geofence-metric__fill--petition {
+  background: linear-gradient(90deg, #fb923c, #f97316);
+}
+
+.admin-geofence-metric__caption {
+  margin: 0;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.admin-geofence-metric--petition .admin-geofence-metric__track {
+  background: #fffbeb;
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.12);
+}
+
 .metric-grid {
   margin-top: 0.5rem;
   display: grid;
@@ -2409,7 +2959,8 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
 .progress-bar-track {
   height: 10px;
   border-radius: 999px;
-  background: #dbeafe;
+  background: #eff6ff;
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.16);
   overflow: hidden;
 }
 
@@ -2418,6 +2969,15 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
   border-radius: 999px;
   background: linear-gradient(90deg, #3b82f6, #2563eb);
   transition: width 180ms ease;
+}
+
+/* Canvasser area panel: both classes are present; must beat .progress-bar-fill (same element). */
+.progress-bar-fill.canvasser-areas-progress-fill {
+  background: linear-gradient(90deg, #a78bfa, #7c3aed);
+}
+
+.progress-bar-fill.canvasser-areas-progress-fill--petition {
+  background: linear-gradient(90deg, #fb923c, #f97316);
 }
 
 @media (max-width: 900px) {
@@ -2691,12 +3251,35 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
 
   .canvasser-areas-panel.canvasser-areas-panel--expanded {
     max-height: min(58vh, 440px);
-    overflow-y: auto;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
     padding: 0;
   }
 
   .canvasser-areas-panel--expanded .canvasser-areas-expandable {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     padding: 0 0.75rem max(0.65rem, calc(0.35rem + env(safe-area-inset-bottom, 0px)));
+  }
+
+  .canvasser-areas-panel--expanded .canvasser-areas-strip-bars {
+    display: none;
+  }
+
+  .canvasser-areas-panel--expanded .canvasser-areas-strip-meta--stacked {
+    display: none;
+  }
+
+  .canvasser-areas-panel .canvasser-areas-panel-title-row h3 {
+    display: none;
+  }
+
+  .canvasser-areas-panel .canvasser-areas-panel-title-row {
+    justify-content: flex-end;
+    margin-bottom: 0.25rem;
   }
 
   .canvasser-areas-mobile-strip {
@@ -2718,7 +3301,6 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
   .canvasser-areas-mobile-strip:focus-visible {
     outline: 2px solid #7c3aed;
     outline-offset: -2px;
-    z-index: 1;
   }
 
   .canvasser-areas-panel:not(.canvasser-areas-panel--expanded) .canvasser-areas-mobile-strip {
@@ -2782,6 +3364,26 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
 
   .admin-geofence-expandable {
     display: block !important;
+  }
+
+  /* Admin map: right column fills viewport height; one vertical scroll inside the panel body. */
+  .admin-geofence-panel.geofence-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .admin-geofence-panel .admin-geofence-expandable {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .admin-geofence-panel .admin-geofence-overview-list {
+    max-height: none;
+    overflow-y: visible;
   }
 
   .canvasser-areas-mobile-strip {

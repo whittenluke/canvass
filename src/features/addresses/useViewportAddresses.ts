@@ -60,7 +60,7 @@ export function useViewportAddresses({
       if (rpcResult.error) {
         const { data, error } = await supabase
           .from('addresses')
-          .select('id,full_address,lat,long,canvassed')
+          .select('id,full_address,lat,long,canvassed,signed_petition')
           .gte('lat', viewport.south)
           .lte('lat', viewport.north)
           .gte('long', viewport.west)

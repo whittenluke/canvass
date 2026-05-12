@@ -63,7 +63,13 @@ export async function fetchAddressStatsInsidePolygon(
 ): Promise<GeofenceProgress> {
   const coords = polygon.coordinates[0] ?? []
   if (coords.length === 0) {
-    return { total: 0, canvassed: 0, remaining: 0 }
+    return {
+      total: 0,
+      canvassed: 0,
+      remaining: 0,
+      petitionSigned: 0,
+      petitionRemaining: 0,
+    }
   }
   const lngs = coords.map(([lng]) => lng)
   const lats = coords.map(([, lat]) => lat)
@@ -76,11 +82,12 @@ export async function fetchAddressStatsInsidePolygon(
   const pageSize = 1000
   let total = 0
   let canvassed = 0
+  let petitionSigned = 0
   let done = false
   while (!done) {
     const { data, error } = await client
       .from('addresses')
-      .select('lat,long,canvassed')
+      .select('lat,long,canvassed,signed_petition')
       .gte('lat', minLat)
       .lte('lat', maxLat)
       .gte('long', minLng)
@@ -89,17 +96,26 @@ export async function fetchAddressStatsInsidePolygon(
     if (error) {
       throw new Error(error.message)
     }
-    const rows = (data as Array<{ lat: number; long: number; canvassed: boolean }>) ?? []
+    const rows =
+      (data as Array<{ lat: number; long: number; canvassed: boolean; signed_petition: boolean }>) ??
+      []
     rows.forEach((row) => {
       if (booleanPointInPolygon(point([row.long, row.lat]), polygon)) {
         total += 1
         if (row.canvassed) canvassed += 1
+        if (row.signed_petition) petitionSigned += 1
       }
     })
     if (rows.length < pageSize) done = true
     else from += pageSize
   }
-  return { total, canvassed, remaining: Math.max(total - canvassed, 0) }
+  return {
+    total,
+    canvassed,
+    remaining: Math.max(total - canvassed, 0),
+    petitionSigned,
+    petitionRemaining: Math.max(total - petitionSigned, 0),
+  }
 }
 
 export function streetHeadingFromFullAddress(fullAddress: string): string {

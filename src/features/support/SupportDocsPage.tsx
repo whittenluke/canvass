@@ -96,8 +96,8 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
           listItems: [
             'Create users, add access, and remove users',
             'View the full map, create and manage areas, assign areas to users, and track progress',
-            'Mark individual addresses canvassed or uncanvassed',
-            'Mark an entire area canvassed or uncanvassed when needed',
+            'Mark individual addresses canvassed or uncanvassed, and sign or clear petition status',
+            'Mark an entire area canvassed or uncanvassed, or bulk-update petition signatures, when needed',
           ],
         },
         {
@@ -159,20 +159,20 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
         {
           title: 'Viewing progress',
           paragraphs: [
-            'Select an area to view its progress. Progress is shown as a number and percentage based on how many addresses in that area have been marked canvassed.',
+            'Select an area to view its progress. Canvassed and petition signatures are tracked separately, each as a count and percentage of addresses in that area.',
           ],
         },
         {
           title: 'Marking addresses',
           paragraphs: [
-            'Admins can mark individual addresses canvassed by clicking an address dot and using the action button.',
+            'Admins can mark individual addresses canvassed or uncanvassed, and sign or clear petition status, by clicking an address dot and using the action buttons.',
             'Admins can also mark an address uncanvassed if a correction is needed.',
           ],
         },
         {
           title: 'Marking an entire area',
           paragraphs: [
-            'If needed, admins can mark a full area canvassed or uncanvassed from the area controls.',
+            'If needed, admins can mark a full area canvassed or uncanvassed, or mark all addresses signed petition or all unsigned, from the area actions menu.',
             'Use this carefully, since it affects all addresses in the selected area.',
           ],
         },
@@ -192,8 +192,8 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
           listItems: [
             'Sign in',
             'View the areas assigned to you',
-            'Mark addresses as canvassed from either the map or the address list',
-            'Track progress for each area',
+            'Mark addresses as canvassed and record petition signatures from either the map or the address list',
+            'Track canvassed and petition progress for each area',
           ],
         },
         {
@@ -208,21 +208,21 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
           title: 'Using the map',
           imageSrc: '/images/support-canvasser-marked-canvassed.png',
           imageAlt:
-            'Address popup on the map with full address and Mark canvassed button.',
+            'Address popup on the map with full address and buttons for canvassed and petition actions.',
           imageCaption: [
-            'When you open an assigned area, you can view its addresses on the map and mark them as canvassed.',
-            'Tap an address dot, then use the button to mark it canvassed.',
-            'You can also mark an address uncanvassed the same way.',
+            'When you open an assigned area, you can view its addresses on the map and mark canvassed status or petition signatures.',
+            'Tap an address dot, then use the buttons to mark canvassed or sign/clear petition.',
+            'You can also mark an address uncanvassed or clear petition the same way.',
           ],
         },
         {
           title: 'Using address view',
           imageSrc: '/images/support-canvass-address-view.png',
           imageAlt:
-            'Address list view with streets grouped, expanded street showing addresses and Mark canvassed buttons.',
+            'Address list view with streets grouped, expanded street showing addresses and action buttons.',
           imageCaption: [
             'In addition to the map view, you can also view addresses in your area using the address view. In this view, addresses are grouped by street.',
-            'Open a street section to see the addresses in that group. Use the button next to an address to mark it canvassed.',
+            'Open a street section to see the addresses in that group. Use the buttons next to an address to mark canvassed or sign/clear petition.',
             'This view is helpful when map dots are close together or when you want to work through a street in order.',
           ],
         },
