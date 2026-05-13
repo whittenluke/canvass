@@ -119,6 +119,8 @@ export function GeofenceDrawManager({
   const featureGroupRef = useRef<L.FeatureGroup | null>(null)
   const drawControlRef = useRef<L.Control.Draw | null>(null)
   const blockGeofenceClearOnMapClickRef = useRef(false)
+  /** Canvasser: fence click bubbles to map; skip one map.clear so onSelect('') does not undo fence focus. */
+  const skipNextBubbledMapClearRef = useRef(false)
 
   useEffect(() => {
     if (!featureGroupRef.current) {
@@ -178,7 +180,14 @@ export function GeofenceDrawManager({
       layer.geofenceId = fence.id
       if (allowGeofenceSelect) {
         layer.on('click', (e: L.LeafletMouseEvent) => {
-          L.DomEvent.stopPropagation(e)
+          if (enabled) {
+            L.DomEvent.stopPropagation(e)
+          } else {
+            skipNextBubbledMapClearRef.current = true
+            window.requestAnimationFrame(() => {
+              skipNextBubbledMapClearRef.current = false
+            })
+          }
           onSelect(fence.id)
         })
       }
@@ -241,6 +250,7 @@ export function GeofenceDrawManager({
     }
     const onMapClick = () => {
       if (blockGeofenceClearOnMapClickRef.current) return
+      if (skipNextBubbledMapClearRef.current) return
       onSelect('')
     }
     map.on('click', onMapClick)

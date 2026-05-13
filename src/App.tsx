@@ -2677,17 +2677,11 @@ function App() {
               }
             >
               <div className="canvasser-list-progress-card">
-                <p className="canvasser-list-progress-scope">
-                  {canvasserEffectiveFocusGeofenceId ? (
-                    <>
-                      <strong>{canvasserDisplayProgress.total}</strong> addresses in this area
-                    </>
-                  ) : (
-                    <>
-                      <strong>{canvasserDisplayProgress.total}</strong> addresses across your assigned areas
-                    </>
-                  )}
-                </p>
+                {canvasserEffectiveFocusGeofenceId ? (
+                  <p className="canvasser-list-progress-scope">
+                    <strong>{canvasserDisplayProgress.total}</strong> addresses in this area
+                  </p>
+                ) : null}
                 <div className="canvasser-list-metric">
                   <div className="canvasser-list-metric-head">
                     <span className="canvasser-list-metric-label" id="canvasser-list-m-canvassed">
