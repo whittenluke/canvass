@@ -1,6 +1,8 @@
 export {
   GeofenceDrawManager,
+  GeofenceChevronLeftIcon,
   GeofenceMarkCanvassedIcon,
+  GeofencePencilIcon,
   GeofenceTrashIcon,
   MapHelpInfoIcon,
   MapPaneSetup,

@@ -9,6 +9,10 @@ Canvass is a role-based field canvassing app. Admins manage access and geofences
 - Backend/auth/data: Supabase (`src/lib/supabase.ts`)
 - Hosting: Netlify (`netlify.toml`)
 
+## UI typography
+
+Headings and panel titles use shared tokens in `src/index.css` (see [docs/typography.md](docs/typography.md)). Prefer those variables for new screens so type stays consistent.
+
 ## Environment variables
 
 Set these in your local environment:

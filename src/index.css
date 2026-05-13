@@ -4,6 +4,40 @@
   box-sizing: border-box;
 }
 
+:root {
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-weight-heading: 700;
+  --line-height-heading: 1.22;
+  --letter-spacing-heading: -0.02em;
+
+  /* Primary titles inside the app (panels, sheets, admin sections, auth card) */
+  --heading-panel: 1.0625rem;
+  /* App chrome (top bar) */
+  --heading-app-bar: 1.125rem;
+  /* Marketing / long-form doc hero (support guide title) */
+  --heading-doc-page: clamp(1.28rem, 2.4vw, 1.52rem);
+
+  /* Form + inline metric row labels (not page titles) */
+  --text-ui-label-size: 0.875rem;
+  --text-ui-label-weight: 600;
+  --text-ui-label-tracking: 0.02em;
+  --text-field-value-size: 0.9375rem;
+  --text-field-value-weight: 500;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: inherit;
+  font-weight: var(--font-weight-heading);
+  font-style: normal;
+  line-height: var(--line-height-heading);
+  letter-spacing: var(--letter-spacing-heading);
+}
+
 html,
 body {
   height: 100%;
@@ -12,7 +46,7 @@ body {
 body,
 #root {
   margin: 0;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
   color: #102a43;
   background: #f0f4f8;
 }

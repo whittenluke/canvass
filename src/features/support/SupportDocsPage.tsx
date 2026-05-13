@@ -159,7 +159,7 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
         {
           title: 'Viewing progress',
           paragraphs: [
-            'Select an area to view its progress. Canvassed and petition signatures are tracked separately, each as a count and percentage of addresses in that area.',
+            'Select an area to view its progress. Canvassed is shown as a count and percentage of addresses in that area; petitions signed are shown as a total signature count.',
           ],
         },
         {
@@ -193,7 +193,7 @@ export function SupportDocsPage({ audience, viewerRole }: SupportDocsPageProps) 
             'Sign in',
             'View the areas assigned to you',
             'Mark addresses as canvassed and record petition signatures from either the map or the address list',
-            'Track canvassed and petition progress for each area',
+            'Track canvassed progress by area and see total petitions signed',
           ],
         },
         {

@@ -51,7 +51,9 @@ import { useViewportAddresses } from './features/addresses/useViewportAddresses'
 import { useVisibleGeofences } from './features/geofences/useVisibleGeofences'
 import {
   GeofenceDrawManager,
+  GeofenceChevronLeftIcon,
   GeofenceMarkCanvassedIcon,
+  GeofencePencilIcon,
   GeofenceTrashIcon,
   MapHelpInfoIcon,
   MapPaneSetup,
@@ -137,6 +139,7 @@ function App() {
   const [selectedGeofenceId, setSelectedGeofenceId] = useState('')
   const [geofenceNameDraft, setGeofenceNameDraft] = useState('')
   const [geofenceEmailDraft, setGeofenceEmailDraft] = useState('')
+  const [isEditingGeofenceTitle, setIsEditingGeofenceTitle] = useState(false)
   const [geofenceProgress, setGeofenceProgress] = useState<GeofenceProgress | null>(null)
   const [isGeofenceProgressLoading, setIsGeofenceProgressLoading] = useState(false)
   const [adminGeofenceOverviewRows, setAdminGeofenceOverviewRows] = useState<
@@ -164,6 +167,9 @@ function App() {
   const [markAllTargetSigned, setMarkAllTargetSigned] = useState(true)
   const [geofencePanelMenuOpen, setGeofencePanelMenuOpen] = useState(false)
   const geofencePanelMenuRef = useRef<HTMLDivElement>(null)
+  const geofenceTitleInputRef = useRef<HTMLInputElement>(null)
+  const geofenceTitleDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const geofenceDetailDraftsRef = useRef({ name: '', email: '' })
   const [assigneePickerOpen, setAssigneePickerOpen] = useState(false)
   const geofenceAssigneePickerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
@@ -389,7 +395,7 @@ function App() {
     const draft = geofenceNameDraft.trim()
     const persisted = selectedGeofence.name?.trim() ?? ''
     const title = draft || persisted
-    return title ? `${title} details` : 'Area details'
+    return title || 'Unnamed area'
   }, [selectedGeofence, geofenceNameDraft])
   const geofenceCompletionPercent = useMemo(() => {
     if (!geofenceProgress) return 0
@@ -399,14 +405,6 @@ function App() {
     if (!Number.isFinite(canvassed)) return 0
     return Math.min(100, Math.round((canvassed / total) * 100))
   }, [geofenceProgress])
-  const geofencePetitionCompletionPercent = useMemo(() => {
-    if (!geofenceProgress) return 0
-    const total = Number(geofenceProgress.total)
-    if (!Number.isFinite(total) || total <= 0) return 0
-    const signed = Number(geofenceProgress.petitionSigned)
-    if (!Number.isFinite(signed)) return 0
-    return Math.min(100, Math.round((signed / total) * 100))
-  }, [geofenceProgress])
   const adminGeofenceOverviewDisplay = useMemo(() => {
     if (!adminGeofenceOverviewRows) return []
     const byId = new Map(adminGeofenceOverviewRows.map((r) => [r.geofence_id, r]))
@@ -415,11 +413,9 @@ function App() {
         const p = byId.get(g.id)
         const total = p?.total_count ?? 0
         const canvassed = p?.canvassed_count ?? 0
-        const petitionSigned = p?.petition_signed_count ?? 0
         const pct = total === 0 ? 0 : Math.round((canvassed / total) * 100)
-        const petitionPct = total === 0 ? 0 : Math.round((petitionSigned / total) * 100)
         const name = g.name.trim() || 'Unnamed area'
-        return { id: g.id, name, total, canvassed, petitionSigned, pct, petitionPct }
+        return { id: g.id, name, total, canvassed, pct }
       })
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [adminGeofencesFiltered, adminGeofenceOverviewRows])
@@ -987,10 +983,16 @@ function App() {
       setGeofenceProgress(null)
       return
     }
-    setGeofenceNameDraft(selectedGeofence.name)
+    if (!isEditingGeofenceTitle) {
+      setGeofenceNameDraft(selectedGeofence.name ?? '')
+    }
     setGeofenceEmailDraft(selectedGeofence.assigned_email ?? '')
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [selectedGeofenceId, selectedGeofence])
+  }, [selectedGeofence, isEditingGeofenceTitle])
+
+  useEffect(() => {
+    setIsEditingGeofenceTitle(false)
+  }, [selectedGeofenceId])
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- geofence progress lifecycle controls */
@@ -2055,26 +2057,114 @@ function App() {
     return true
   }
 
-  const saveSelectedGeofence = async () => {
-    if (!supabase || !selectedGeofenceId || role !== 'admin') return
-    const name = geofenceNameDraft.trim() || 'Unnamed area'
-    const assignedEmail = geofenceEmailDraft.trim().toLowerCase() || null
-    const { error } = await supabase.rpc('admin_update_geofence_details', {
-      p_geofence_id: selectedGeofenceId,
-      p_name: name,
-      p_assigned_email: assignedEmail ?? '',
-    })
-    if (error) {
-      setGeofenceMessage(error.message)
+  const flushGeofenceTitleDebounce = useCallback(() => {
+    if (geofenceTitleDebounceRef.current) {
+      clearTimeout(geofenceTitleDebounceRef.current)
+      geofenceTitleDebounceRef.current = null
+    }
+  }, [])
+
+  const persistSelectedGeofenceDetails = useCallback(
+    async (opts?: { silent?: boolean }): Promise<boolean> => {
+      if (!supabase || !selectedGeofenceId || role !== 'admin') return false
+      const name = geofenceDetailDraftsRef.current.name.trim() || 'Unnamed area'
+      const assignedEmail = geofenceDetailDraftsRef.current.email.trim().toLowerCase() || null
+      const { error } = await supabase.rpc('admin_update_geofence_details', {
+        p_geofence_id: selectedGeofenceId,
+        p_name: name,
+        p_assigned_email: assignedEmail ?? '',
+      })
+      if (error) {
+        setGeofenceMessage(error.message)
+        return false
+      }
+      setGeofences((current) =>
+        current.map((fence) =>
+          fence.id === selectedGeofenceId ? { ...fence, name, assigned_email: assignedEmail } : fence,
+        ),
+      )
+      if (!opts?.silent) setGeofenceMessage('Area details saved.')
+      return true
+    },
+    [supabase, selectedGeofenceId, role],
+  )
+
+  const commitGeofenceTitleEdit = useCallback(
+    async (opts: { silent: boolean }) => {
+      flushGeofenceTitleDebounce()
+      geofenceDetailDraftsRef.current = { name: geofenceNameDraft, email: geofenceEmailDraft }
+      const trimmed = geofenceNameDraft.trim() || 'Unnamed area'
+      const persisted = (selectedGeofence?.name ?? '').trim() || 'Unnamed area'
+      if (trimmed !== persisted) {
+        const ok = await persistSelectedGeofenceDetails({ silent: opts.silent })
+        if (!ok) return
+      }
+      setIsEditingGeofenceTitle(false)
+    },
+    [
+      flushGeofenceTitleDebounce,
+      geofenceNameDraft,
+      geofenceEmailDraft,
+      selectedGeofence?.name,
+      persistSelectedGeofenceDetails,
+    ],
+  )
+
+  const cancelGeofenceTitleEdit = useCallback(() => {
+    flushGeofenceTitleDebounce()
+    setGeofenceNameDraft(selectedGeofence?.name ?? '')
+    setIsEditingGeofenceTitle(false)
+  }, [flushGeofenceTitleDebounce, selectedGeofence?.name])
+
+  const startGeofenceTitleEdit = useCallback(() => {
+    setGeofencePanelMenuOpen(false)
+    setIsEditingGeofenceTitle(true)
+  }, [])
+
+  const saveSelectedGeofence = useCallback(async () => {
+    flushGeofenceTitleDebounce()
+    geofenceDetailDraftsRef.current = { name: geofenceNameDraft, email: geofenceEmailDraft }
+    await persistSelectedGeofenceDetails({ silent: false })
+  }, [flushGeofenceTitleDebounce, geofenceNameDraft, geofenceEmailDraft, persistSelectedGeofenceDetails])
+
+  useEffect(() => {
+    geofenceDetailDraftsRef.current = { name: geofenceNameDraft, email: geofenceEmailDraft }
+  }, [geofenceNameDraft, geofenceEmailDraft])
+
+  useEffect(() => {
+    if (!isEditingGeofenceTitle || !selectedGeofenceId || role !== 'admin') return
+    const trimmed = geofenceNameDraft.trim() || 'Unnamed area'
+    const persisted = (selectedGeofence?.name ?? '').trim() || 'Unnamed area'
+    if (trimmed === persisted) {
+      flushGeofenceTitleDebounce()
       return
     }
-    setGeofences((current) =>
-      current.map((fence) =>
-        fence.id === selectedGeofenceId ? { ...fence, name, assigned_email: assignedEmail } : fence,
-      ),
-    )
-    setGeofenceMessage('Area details saved.')
-  }
+    geofenceTitleDebounceRef.current = setTimeout(() => {
+      geofenceTitleDebounceRef.current = null
+      void persistSelectedGeofenceDetails({ silent: true })
+    }, 700)
+    return () => {
+      flushGeofenceTitleDebounce()
+    }
+  }, [
+    isEditingGeofenceTitle,
+    selectedGeofenceId,
+    role,
+    geofenceNameDraft,
+    selectedGeofence?.name,
+    flushGeofenceTitleDebounce,
+    persistSelectedGeofenceDetails,
+  ])
+
+  useEffect(() => {
+    if (!isEditingGeofenceTitle) return
+    const id = window.requestAnimationFrame(() => {
+      const el = geofenceTitleInputRef.current
+      el?.focus()
+      el?.select()
+    })
+    return () => window.cancelAnimationFrame(id)
+  }, [isEditingGeofenceTitle])
 
   const confirmGeofenceDelete = async () => {
     if (!selectedGeofenceId || role !== 'admin') return
@@ -2574,26 +2664,14 @@ function App() {
                 <div className="canvasser-list-metric canvasser-list-metric--petition">
                   <div className="canvasser-list-metric-head">
                     <span className="canvasser-list-metric-label" id="canvasser-list-m-petition">
-                      Petition signed
+                      Signatures
                     </span>
-                    <span className="canvasser-list-metric-pct">{canvasserDisplayProgress.petitionPercent}%</span>
-                  </div>
-                  <p className="canvasser-list-metric-caption">
-                    {canvasserDisplayProgress.petitionDone} of {canvasserDisplayProgress.total} addresses
-                  </p>
-                  <div
-                    className="canvasser-list-metric-rail canvasser-list-metric-rail--petition"
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={canvasserDisplayProgress.petitionPercent}
-                    aria-labelledby="canvasser-list-m-petition"
-                    aria-valuetext={`${canvasserDisplayProgress.petitionDone} of ${canvasserDisplayProgress.total} petition signatures`}
-                  >
-                    <div
-                      className="canvasser-list-metric-fill canvasser-list-metric-fill--petition"
-                      style={{ width: `${canvasserDisplayProgress.petitionPercent}%` }}
-                    />
+                    <span
+                      className="canvasser-list-metric-pct"
+                      aria-labelledby="canvasser-list-m-petition"
+                    >
+                      {canvasserDisplayProgress.petitionDone}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -3114,7 +3192,7 @@ function App() {
                           type="button"
                           className="progress-summary canvasser-progress-summary--tap-all"
                           onClick={() => setCanvasserFocusedGeofenceId('')}
-                          aria-label={`${canvasserDrawerOverallProgress.canvassedDone} of ${canvasserDrawerOverallProgress.total} addresses canvassed (${canvasserDrawerOverallProgress.canvassedPercent} percent). ${canvasserDrawerOverallProgress.petitionDone} of ${canvasserDrawerOverallProgress.total} petition signed (${canvasserDrawerOverallProgress.petitionPercent} percent). Tap to show all areas on the map.`}
+                          aria-label={`${canvasserDrawerOverallProgress.canvassedDone} of ${canvasserDrawerOverallProgress.total} addresses canvassed (${canvasserDrawerOverallProgress.canvassedPercent} percent). ${canvasserDrawerOverallProgress.petitionDone} petitions signed. Tap to show all areas on the map.`}
                         >
                           <div className="progress-headline">
                             <span className="progress-headline-label">Canvassed</span>
@@ -3131,18 +3209,8 @@ function App() {
                             />
                           </div>
                           <div className="progress-headline canvasser-progress-headline--secondary">
-                            <span className="progress-headline-label">Petition signed</span>
-                            <strong>{canvasserDrawerOverallProgress.petitionPercent}%</strong>
-                          </div>
-                          <p className="progress-subline">
-                            {canvasserDrawerOverallProgress.petitionDone} of{' '}
-                            {canvasserDrawerOverallProgress.total} addresses
-                          </p>
-                          <div className="progress-bar-track" aria-hidden="true">
-                            <div
-                              className="progress-bar-fill canvasser-areas-progress-fill--petition"
-                              style={{ width: `${canvasserDrawerOverallProgress.petitionPercent}%` }}
-                            />
+                            <span className="progress-headline-label">Signatures</span>
+                            <strong>{canvasserDrawerOverallProgress.petitionDone}</strong>
                           </div>
                         </button>
                       ) : (
@@ -3169,25 +3237,8 @@ function App() {
                             />
                           </div>
                           <div className="progress-headline canvasser-progress-headline--secondary">
-                            <span className="progress-headline-label">Petition signed</span>
-                            <strong>{canvasserDrawerOverallProgress.petitionPercent}%</strong>
-                          </div>
-                          <p className="progress-subline">
-                            {canvasserDrawerOverallProgress.petitionDone} of{' '}
-                            {canvasserDrawerOverallProgress.total} addresses
-                          </p>
-                          <div
-                            className="progress-bar-track"
-                            role="progressbar"
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-valuenow={canvasserDrawerOverallProgress.petitionPercent}
-                            aria-valuetext={`${canvasserDrawerOverallProgress.petitionDone} of ${canvasserDrawerOverallProgress.total} petition signatures`}
-                          >
-                            <div
-                              className="progress-bar-fill canvasser-areas-progress-fill--petition"
-                              style={{ width: `${canvasserDrawerOverallProgress.petitionPercent}%` }}
-                            />
+                            <span className="progress-headline-label">Petitions signed</span>
+                            <strong>{canvasserDrawerOverallProgress.petitionDone}</strong>
                           </div>
                         </div>
                       )}
@@ -3215,9 +3266,9 @@ function App() {
                                         </span>
                                       </span>
                                       <span className="canvasser-area-summary-pair">
-                                        <span className="canvasser-area-summary-pair-label">Signed</span>
+                                        <span className="canvasser-area-summary-pair-label">Petitions</span>
                                         <span className="canvasser-area-summary-pair-val">
-                                          {area.petitionDone}/{area.total}
+                                          {area.petitionDone}
                                         </span>
                                       </span>
                                     </span>
@@ -3248,26 +3299,10 @@ function App() {
                                             />
                                           </div>
                                         </div>
-                                        <div className="canvasser-area-breakdown-metric">
+                                        <div className="canvasser-area-breakdown-metric canvasser-area-breakdown-metric--petition-count">
                                           <div className="progress-headline canvasser-progress-headline--secondary">
-                                            <span className="progress-headline-label">Petition signed</span>
-                                            <strong>{area.petitionPercent}%</strong>
-                                          </div>
-                                          <p className="progress-subline">
-                                            {area.petitionDone} of {area.total} addresses
-                                          </p>
-                                          <div
-                                            className="progress-bar-track canvasser-area-breakdown-bar canvasser-area-breakdown-bar--petition"
-                                            role="progressbar"
-                                            aria-valuemin={0}
-                                            aria-valuemax={100}
-                                            aria-valuenow={area.petitionPercent}
-                                            aria-valuetext={`${area.name}: ${area.petitionDone} of ${area.total} petition signed`}
-                                          >
-                                            <div
-                                              className="progress-bar-fill canvasser-areas-progress-fill--petition"
-                                              style={{ width: `${area.petitionPercent}%` }}
-                                            />
+                                            <span className="progress-headline-label">Petitions signed</span>
+                                            <strong>{area.petitionDone}</strong>
                                           </div>
                                         </div>
                                         <button
@@ -3351,9 +3386,7 @@ function App() {
                           {canvasserDrawerOverallProgress.canvassedPercent}%)
                         </span>
                         <span className="canvasser-areas-strip-meta-line">
-                          {canvasserDrawerOverallProgress.petitionDone} of{' '}
-                          {canvasserDrawerOverallProgress.total} signed (
-                          {canvasserDrawerOverallProgress.petitionPercent}%)
+                          {canvasserDrawerOverallProgress.petitionDone} petitions signed
                         </span>
                       </span>
                       <span className="canvasser-areas-strip-chevron" aria-hidden="true">
@@ -3365,12 +3398,6 @@ function App() {
                         <div
                           className="canvasser-areas-strip-bar-fill"
                           style={{ width: `${canvasserDrawerOverallProgress.canvassedPercent}%` }}
-                        />
-                      </div>
-                      <div className="canvasser-areas-strip-bar canvasser-areas-strip-bar--petition">
-                        <div
-                          className="canvasser-areas-strip-bar-fill canvasser-areas-strip-bar-fill--petition"
-                          style={{ width: `${canvasserDrawerOverallProgress.petitionPercent}%` }}
                         />
                       </div>
                     </div>
@@ -3408,7 +3435,14 @@ function App() {
                 }
               >
                 <div className="admin-geofence-mobile-strip-row">
-                  <span className="admin-geofence-mobile-strip-title">{geofenceDetailsTitle}</span>
+                  {adminGeofencePanelExpanded && selectedGeofence ? (
+                    <span
+                      className="admin-geofence-mobile-strip-title admin-geofence-mobile-strip-title--spacer"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <span className="admin-geofence-mobile-strip-title">{geofenceDetailsTitle}</span>
+                  )}
                   <span className="admin-geofence-mobile-strip-chevron" aria-hidden="true">
                     {adminGeofencePanelExpanded ? '▲' : '▼'}
                   </span>
@@ -3436,129 +3470,178 @@ function App() {
                   </div>
                 ) : null}
                 {selectedGeofence ? (
-                  <div className="admin-geofence-back-row">
-                    <button
-                      type="button"
-                      className="admin-geofence-back-to-all-btn"
-                      onClick={() => selectGeofenceId('')}
-                    >
-                      ← All areas
-                    </button>
-                  </div>
-                ) : null}
-                <div className="geofence-panel-header">
-                  <h3>{geofenceDetailsTitle}</h3>
-                  {selectedGeofence ? (
-                    <div className="geofence-panel-menu-anchor" ref={geofencePanelMenuRef}>
+                  <div className="admin-geofence-detail-header-stack">
+                    <div className="admin-geofence-detail-back-row">
                       <button
                         type="button"
-                        className="geofence-panel-menu-trigger"
-                        aria-label="Area actions"
-                        aria-expanded={geofencePanelMenuOpen}
-                        aria-haspopup="menu"
-                        aria-controls="geofence-panel-actions-menu"
-                        onClick={() => setGeofencePanelMenuOpen((open) => !open)}
+                        className="admin-geofence-back-to-all-btn"
+                        aria-label="Back to all areas"
+                        onClick={() => selectGeofenceId('')}
                       >
-                        <span className="geofence-panel-menu-dots" aria-hidden="true">
-                          ⋮
-                        </span>
+                        <GeofenceChevronLeftIcon />
+                        <span>All areas</span>
                       </button>
-                      {geofencePanelMenuOpen ? (
-                        <div
-                          id="geofence-panel-actions-menu"
-                          className="geofence-panel-actions-menu"
-                          role="menu"
-                          aria-label="Area actions"
+                    </div>
+                    <div className="geofence-panel-header admin-geofence-detail-title-row">
+                      {isEditingGeofenceTitle ? (
+                        <input
+                          ref={geofenceTitleInputRef}
+                          id="admin-geofence-detail-title"
+                          className="admin-geofence-detail-title-input"
+                          type="text"
+                          aria-label="Area name"
+                          value={geofenceNameDraft}
+                          onChange={(event) => setGeofenceNameDraft(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault()
+                              void commitGeofenceTitleEdit({ silent: false })
+                            } else if (event.key === 'Escape') {
+                              event.preventDefault()
+                              cancelGeofenceTitleEdit()
+                            }
+                          }}
+                          onBlur={() => {
+                            void commitGeofenceTitleEdit({ silent: true })
+                          }}
+                        />
+                      ) : (
+                        <h3
+                          id="admin-geofence-detail-title"
+                          className="admin-geofence-detail-area-title admin-geofence-detail-area-title--with-edit"
                         >
                           <button
                             type="button"
-                            className="geofence-panel-menu-item"
-                            role="menuitem"
-                            disabled={
-                              isGeofenceProgressLoading ||
-                              !geofenceProgress ||
-                              geofenceProgress.remaining <= 0
-                            }
-                            onClick={() => {
-                              setGeofencePanelMenuOpen(false)
-                              setMarkAllTargetCanvassed(true)
-                              setMarkAllCompleteDialogOpen(true)
-                            }}
+                            className="admin-geofence-detail-title-text-btn"
+                            onClick={startGeofenceTitleEdit}
                           >
-                            <GeofenceMarkCanvassedIcon />
-                            <span>Mark all addresses canvassed</span>
+                            {geofenceDetailsTitle}
                           </button>
                           <button
                             type="button"
-                            className="geofence-panel-menu-item"
-                            role="menuitem"
-                            disabled={
-                              isGeofenceProgressLoading ||
-                              !geofenceProgress ||
-                              geofenceProgress.canvassed <= 0
-                            }
-                            onClick={() => {
-                              setGeofencePanelMenuOpen(false)
-                              setMarkAllTargetCanvassed(false)
-                              setMarkAllCompleteDialogOpen(true)
-                            }}
+                            className="admin-geofence-detail-title-icon-btn"
+                            aria-label="Edit area name"
+                            onClick={startGeofenceTitleEdit}
                           >
-                            <GeofenceMarkCanvassedIcon />
-                            <span>Mark all addresses uncanvassed</span>
+                            <GeofencePencilIcon />
                           </button>
-                          <button
-                            type="button"
-                            className="geofence-panel-menu-item"
-                            role="menuitem"
-                            disabled={
-                              isGeofenceProgressLoading ||
-                              !geofenceProgress ||
-                              geofenceProgress.petitionRemaining <= 0
-                            }
-                            onClick={() => {
-                              setGeofencePanelMenuOpen(false)
-                              setMarkAllTargetSigned(true)
-                              setMarkAllPetitionDialogOpen(true)
-                            }}
+                        </h3>
+                      )}
+                      <div className="geofence-panel-menu-anchor" ref={geofencePanelMenuRef}>
+                        <button
+                          type="button"
+                          className="geofence-panel-menu-trigger"
+                          aria-label="Area actions"
+                          aria-expanded={geofencePanelMenuOpen}
+                          aria-haspopup="menu"
+                          aria-controls="geofence-panel-actions-menu"
+                          onClick={() => setGeofencePanelMenuOpen((open) => !open)}
+                        >
+                          <span className="geofence-panel-menu-dots" aria-hidden="true">
+                            ⋮
+                          </span>
+                        </button>
+                        {geofencePanelMenuOpen ? (
+                          <div
+                            id="geofence-panel-actions-menu"
+                            className="geofence-panel-actions-menu"
+                            role="menu"
+                            aria-label="Area actions"
                           >
-                            <GeofenceMarkCanvassedIcon />
-                            <span>Mark all signed petition</span>
-                          </button>
-                          <button
-                            type="button"
-                            className="geofence-panel-menu-item"
-                            role="menuitem"
-                            disabled={
-                              isGeofenceProgressLoading ||
-                              !geofenceProgress ||
-                              geofenceProgress.petitionSigned <= 0
-                            }
-                            onClick={() => {
-                              setGeofencePanelMenuOpen(false)
-                              setMarkAllTargetSigned(false)
-                              setMarkAllPetitionDialogOpen(true)
-                            }}
-                          >
-                            <GeofenceMarkCanvassedIcon />
-                            <span>Mark all unsigned petition</span>
-                          </button>
-                          <button
-                            type="button"
-                            className="geofence-panel-menu-item geofence-panel-menu-item--danger"
-                            role="menuitem"
-                            onClick={() => {
-                              setGeofencePanelMenuOpen(false)
-                              setGeofenceDeleteConfirmId(selectedGeofenceId)
-                            }}
-                          >
-                            <GeofenceTrashIcon />
-                            <span>Delete area</span>
-                          </button>
-                        </div>
-                      ) : null}
+                            <button
+                              type="button"
+                              className="geofence-panel-menu-item"
+                              role="menuitem"
+                              disabled={
+                                isGeofenceProgressLoading ||
+                                !geofenceProgress ||
+                                geofenceProgress.remaining <= 0
+                              }
+                              onClick={() => {
+                                setGeofencePanelMenuOpen(false)
+                                setMarkAllTargetCanvassed(true)
+                                setMarkAllCompleteDialogOpen(true)
+                              }}
+                            >
+                              <GeofenceMarkCanvassedIcon />
+                              <span>Mark all addresses canvassed</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="geofence-panel-menu-item"
+                              role="menuitem"
+                              disabled={
+                                isGeofenceProgressLoading ||
+                                !geofenceProgress ||
+                                geofenceProgress.canvassed <= 0
+                              }
+                              onClick={() => {
+                                setGeofencePanelMenuOpen(false)
+                                setMarkAllTargetCanvassed(false)
+                                setMarkAllCompleteDialogOpen(true)
+                              }}
+                            >
+                              <GeofenceMarkCanvassedIcon />
+                              <span>Mark all addresses uncanvassed</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="geofence-panel-menu-item"
+                              role="menuitem"
+                              disabled={
+                                isGeofenceProgressLoading ||
+                                !geofenceProgress ||
+                                geofenceProgress.petitionRemaining <= 0
+                              }
+                              onClick={() => {
+                                setGeofencePanelMenuOpen(false)
+                                setMarkAllTargetSigned(true)
+                                setMarkAllPetitionDialogOpen(true)
+                              }}
+                            >
+                              <GeofenceMarkCanvassedIcon />
+                              <span>Mark all signed petition</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="geofence-panel-menu-item"
+                              role="menuitem"
+                              disabled={
+                                isGeofenceProgressLoading ||
+                                !geofenceProgress ||
+                                geofenceProgress.petitionSigned <= 0
+                              }
+                              onClick={() => {
+                                setGeofencePanelMenuOpen(false)
+                                setMarkAllTargetSigned(false)
+                                setMarkAllPetitionDialogOpen(true)
+                              }}
+                            >
+                              <GeofenceMarkCanvassedIcon />
+                              <span>Mark all unsigned petition</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="geofence-panel-menu-item geofence-panel-menu-item--danger"
+                              role="menuitem"
+                              onClick={() => {
+                                setGeofencePanelMenuOpen(false)
+                                setGeofenceDeleteConfirmId(selectedGeofenceId)
+                              }}
+                            >
+                              <GeofenceTrashIcon />
+                              <span>Delete area</span>
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
-                  ) : null}
-                </div>
+                  </div>
+                ) : (
+                  <div className="geofence-panel-header">
+                    <h3>{geofenceDetailsTitle}</h3>
+                  </div>
+                )}
                 {selectedGeofence ? (
                   <>
                   <div className="geofence-progress geofence-progress--inline">
@@ -3596,37 +3679,21 @@ function App() {
                         >
                           <div className="admin-geofence-metric__header">
                             <h4 className="admin-geofence-metric__title" id="admin-geofence-metric-petition-title">
-                              Petition signed
+                              Signatures
                             </h4>
-                            <span className="admin-geofence-metric__percent">
-                              {geofencePetitionCompletionPercent}%
+                            <span
+                              className="admin-geofence-metric__numeric"
+                              aria-label={`${geofenceProgress.petitionSigned} petitions signed`}
+                            >
+                              {geofenceProgress.petitionSigned}
                             </span>
                           </div>
-                          <div className="admin-geofence-metric__track" aria-hidden="true">
-                            <div
-                              className="admin-geofence-metric__fill admin-geofence-metric__fill--petition"
-                              style={{
-                                width: `${Math.min(100, Math.max(0, geofencePetitionCompletionPercent))}%`,
-                              }}
-                            />
-                          </div>
-                          <p className="admin-geofence-metric__caption">
-                            {geofenceProgress.petitionSigned} of {geofenceProgress.total} addresses
-                          </p>
                         </section>
                       </div>
                     ) : (
                       <p>Select an area to see progress.</p>
                     )}
                   </div>
-                  <label>
-                    Area name
-                    <input
-                      type="text"
-                      value={geofenceNameDraft}
-                      onChange={(event) => setGeofenceNameDraft(event.target.value)}
-                    />
-                  </label>
                   <label>
                     Assigned canvasser
                     <div className="geofence-assignee-picker" ref={geofenceAssigneePickerRef}>
@@ -3706,9 +3773,6 @@ function App() {
                   </p>
                 ) : (
                   <div className="admin-geofence-overview">
-                    <p className="admin-geofence-overview-hint">
-                      Click a row or a polygon to edit assignment and view progress.
-                    </p>
                     {isAdminGeofenceOverviewLoading ? (
                       <p className="admin-geofence-overview-status">Loading areas…</p>
                     ) : adminGeofenceOverviewError ? (
@@ -3740,24 +3804,6 @@ function App() {
                                       className="admin-geofence-overview-metric__fill admin-geofence-overview-metric__fill--canvassed"
                                       style={{
                                         width: `${Math.min(100, Math.max(0, Number(row.pct) || 0))}%`,
-                                      }}
-                                    />
-                                  </div>
-                                </div>
-                                <div className="admin-geofence-overview-metric admin-geofence-overview-metric--petition">
-                                  <div className="admin-geofence-overview-metric__top">
-                                    <span className="admin-geofence-overview-metric__label">
-                                      Petition signed
-                                    </span>
-                                    <span className="admin-geofence-overview-metric__stat">
-                                      {row.petitionSigned} of {row.total} ({row.petitionPct}%)
-                                    </span>
-                                  </div>
-                                  <div className="admin-geofence-overview-metric__track" aria-hidden="true">
-                                    <div
-                                      className="admin-geofence-overview-metric__fill admin-geofence-overview-metric__fill--petition"
-                                      style={{
-                                        width: `${Math.min(100, Math.max(0, Number(row.petitionPct) || 0))}%`,
                                       }}
                                     />
                                   </div>
@@ -3947,20 +3993,9 @@ function App() {
                   </p>
                 </div>
                 <div className="admin-dashboard-metric-card admin-dashboard-metric-card--petition">
-                  <h3 className="admin-dashboard-metric-title">Signatures</h3>
+                  <h3 className="admin-dashboard-metric-title">Petitions signed</h3>
                   <p className="admin-dashboard-metric-value">
                     <strong>{adminDashboardEffort.petition_signed_count}</strong>
-                    <span className="admin-dashboard-metric-sep"> / </span>
-                    {adminDashboardEffort.total_addresses_in_areas}
-                  </p>
-                  <p className="admin-dashboard-metric-sub">
-                    {adminDashboardEffort.total_addresses_in_areas === 0
-                      ? '—'
-                      : `${Math.round(
-                          (adminDashboardEffort.petition_signed_count /
-                            adminDashboardEffort.total_addresses_in_areas) *
-                            100,
-                        )}%`}
                   </p>
                 </div>
               </div>
