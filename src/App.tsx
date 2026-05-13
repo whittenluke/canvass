@@ -183,7 +183,7 @@ function App() {
   const [adminExitAreaDetailMapLatch, setAdminExitAreaDetailMapLatch] = useState(false)
   const [addressPopupOpenId, setAddressPopupOpenId] = useState<string | null>(null)
   const [nearbyAddressSheet, setNearbyAddressSheet] = useState<{ memberIds: string[] } | null>(null)
-  const [canvasserUiView, setCanvasserUiView] = useState<'map' | 'list'>('map')
+  const [canvasserUiView, setCanvasserUiView] = useState<'map' | 'list' | 'dashboard'>('map')
   const [canvasserListAddresses, setCanvasserListAddresses] = useState<AddressRow[] | null>(null)
   const [isCanvasserListLoading, setIsCanvasserListLoading] = useState(false)
   const [canvasserListFetchError, setCanvasserListFetchError] = useState('')
@@ -1182,9 +1182,14 @@ function App() {
   }, [role, selectedGeofenceId, adminGeofenceIdsKey, supabase])
 
   useEffect(() => {
-    if (role !== 'admin' || activeAdminView !== 'dashboard' || !supabase) {
+    if (role !== 'admin' && role !== 'canvasser') return
+    if (
+      (role === 'admin' && activeAdminView !== 'dashboard') ||
+      (role === 'canvasser' && canvasserUiView !== 'dashboard')
+    ) {
       return
     }
+    if (!supabase) return
     let cancelled = false
     const toNum = (v: unknown): number => {
       if (typeof v === 'number' && Number.isFinite(v)) return v
@@ -1263,7 +1268,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [role, activeAdminView, supabase, adminDashboardLeaderboardRange])
+  }, [role, activeAdminView, canvasserUiView, supabase, adminDashboardLeaderboardRange])
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- reset panel/dialog state when fence changes */
@@ -2557,33 +2562,48 @@ function App() {
         </div>
       )}
 
-      {role === 'canvasser' && canvasserUiView === 'list' && (
-        <nav className="canvasser-view-nav" aria-label="Canvasser views">
-          <button type="button" className="view-tab" onClick={() => setCanvasserUiView('map')}>
-            Map
-          </button>
-          <button type="button" className="view-tab active" onClick={() => setCanvasserUiView('list')}>
-            Address list
-          </button>
-        </nav>
-      )}
-
-      {role === 'canvasser' && canvasserUiView === 'map' && (
+      {role === 'canvasser' && (
         <div className="map-toolbar-row">
           <nav className="map-toolbar-nav" aria-label="Canvasser views">
-            <button type="button" className="view-tab active" onClick={() => setCanvasserUiView('map')}>
+            <button
+              type="button"
+              className={canvasserUiView === 'map' ? 'view-tab active' : 'view-tab'}
+              onClick={() => {
+                setGeofenceDeleteConfirmId(null)
+                setCanvasserUiView('map')
+              }}
+            >
               Map
             </button>
-            <button type="button" className="view-tab" onClick={() => setCanvasserUiView('list')}>
+            <button
+              type="button"
+              className={canvasserUiView === 'list' ? 'view-tab active' : 'view-tab'}
+              onClick={() => {
+                setGeofenceDeleteConfirmId(null)
+                setCanvasserUiView('list')
+              }}
+            >
               Address list
             </button>
+            <button
+              type="button"
+              className={canvasserUiView === 'dashboard' ? 'view-tab active' : 'view-tab'}
+              onClick={() => {
+                setGeofenceDeleteConfirmId(null)
+                setCanvasserUiView('dashboard')
+              }}
+            >
+              Dashboard
+            </button>
           </nav>
-          <MapStatusLine
-            dotsEnabled={dotsEnabled}
-            showAddressDots={showAddressDots}
-            hitViewportLimit={hitViewportLimit}
-            role={role}
-          />
+          {canvasserUiView === 'map' ? (
+            <MapStatusLine
+              dotsEnabled={dotsEnabled}
+              showAddressDots={showAddressDots}
+              hitViewportLimit={hitViewportLimit}
+              role={role}
+            />
+          ) : null}
         </div>
       )}
 
@@ -2817,7 +2837,8 @@ function App() {
             </div>
           )}
         </section>
-      ) : (role !== 'admin' || activeAdminView === 'map') ? (
+      ) : (role === 'admin' && activeAdminView === 'map') ||
+        (role === 'canvasser' && canvasserUiView === 'map') ? (
         <section className="map-page">
           <section className="map-panel">
             <MapContainer
@@ -4008,7 +4029,8 @@ function App() {
           )}
         </section>
       ) : null}
-      {role === 'admin' && activeAdminView === 'dashboard' && (
+      {(role === 'admin' && activeAdminView === 'dashboard') ||
+      (role === 'canvasser' && canvasserUiView === 'dashboard') ? (
         <section className="admin-panel admin-dashboard" aria-label="Canvassing effort dashboard">
           <div className="admin-panel-header">
             <div>
@@ -4106,7 +4128,7 @@ function App() {
             <p className="access-message">No summary data.</p>
           )}
         </section>
-      )}
+      ) : null}
       {role === 'admin' && activeAdminView === 'access' && (
         <section className="admin-panel">
           <div className="admin-panel-header">
