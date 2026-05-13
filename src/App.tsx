@@ -420,6 +420,30 @@ function App() {
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [adminGeofencesFiltered, adminGeofenceOverviewRows])
 
+  const fitAdminMapToGeofenceList = useCallback((fences: GeofenceRow[]) => {
+    const map = mapRef.current
+    if (!map || fences.length === 0) return
+    const bounds = L.latLngBounds([])
+    for (const fence of fences) {
+      const ring = fence.geometry.coordinates[0] ?? []
+      for (const [lng, lat] of ring) {
+        bounds.extend([lat, lng])
+      }
+    }
+    if (!bounds.isValid()) return
+    const pad = 34
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        map.fitBounds(bounds, {
+          paddingTopLeft: [pad, pad],
+          paddingBottomRight: [pad, pad],
+          maxZoom: 16,
+          animate: true,
+        })
+      })
+    })
+  }, [])
+
   useEffect(() => {
     if (role !== 'admin') {
       setAdminAreaViewerEmailFilter('')
@@ -438,8 +462,6 @@ function App() {
 
   useEffect(() => {
     if (role !== 'admin') return
-    const map = mapRef.current
-    if (!map) return
 
     const current = adminAreaViewerEmailFilter.trim().toLowerCase()
     const prev = prevAdminAreaViewerFilterForMapRef.current
@@ -451,29 +473,8 @@ function App() {
     prevAdminAreaViewerFilterForMapRef.current = current
 
     if (adminGeofencesFiltered.length === 0) return
-
-    const bounds = L.latLngBounds([])
-    for (const fence of adminGeofencesFiltered) {
-      const ring = fence.geometry.coordinates[0] ?? []
-      for (const [lng, lat] of ring) {
-        bounds.extend([lat, lng])
-      }
-    }
-    if (!bounds.isValid()) return
-
-    const pad = 34
-    const raf = window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        map.fitBounds(bounds, {
-          paddingTopLeft: [pad, pad],
-          paddingBottomRight: [pad, pad],
-          maxZoom: 16,
-          animate: true,
-        })
-      })
-    })
-    return () => window.cancelAnimationFrame(raf)
-  }, [role, adminAreaViewerEmailFilter, adminGeofencesFiltered])
+    fitAdminMapToGeofenceList(adminGeofencesFiltered)
+  }, [role, adminAreaViewerEmailFilter, adminGeofencesFiltered, fitAdminMapToGeofenceList])
 
   const canSubmitPasswordStep =
     authPasswordIntent === 'sign_in'
@@ -2213,12 +2214,14 @@ function App() {
           })
         })
       }
+    } else if (role === 'admin' && !id) {
+      fitAdminMapToGeofenceList(adminGeofencesFiltered)
     }
   }
 
   const handleGeofenceMapPick = (id: string) => {
     if (role === 'admin') {
-      selectGeofenceId(id)
+      selectGeofenceId(id, { focusOnMap: true })
       return
     }
     if (role === 'canvasser') {
