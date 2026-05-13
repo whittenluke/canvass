@@ -95,7 +95,8 @@ export type AdminDashboardEffortSummaryRow = {
 /** Row from `admin_dashboard_contributor_leaderboard`. */
 export type AdminDashboardContributorRow = {
   actor_id: string
-  actor_email: string
+  /** Display name from Admin Access (first + last); email only if names unset. */
+  actor_name: string
   actor_role: string
   canvassed_marks: number
   petition_marks: number

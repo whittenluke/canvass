@@ -132,6 +132,12 @@ const ADMIN_MAP_EXIT_AREA_LATCH_MIN_LAT_SPAN = 0.105
 const ADMIN_MAP_EXIT_AREA_LATCH_MIN_LNG_SPAN = 0.16
 const ADMIN_MAP_EXIT_AREA_LATCH_FAILSAFE_MS = 3200
 
+function adminDashboardCanvassedPercent(row: AdminDashboardEffortSummaryRow): number {
+  const t = row.total_addresses_in_areas
+  if (t === 0) return 0
+  return Math.min(100, Math.round((row.canvassed_count / t) * 100))
+}
+
 function App() {
   const [role, setRole] = useState<string>('')
   const [addresses, setAddresses] = useState<AddressRow[]>([])
@@ -201,6 +207,8 @@ function App() {
   })
   const [canvasserFocusedGeofenceId, setCanvasserFocusedGeofenceId] = useState('')
   const [canvasserListAreaPickerOpen, setCanvasserListAreaPickerOpen] = useState(false)
+  /** Narrow screens: drawer with Map / Dashboard / … plus Support and Sign out. */
+  const [mobileAppMenuOpen, setMobileAppMenuOpen] = useState(false)
   const [canvasserMapHelpOpen, setCanvasserMapHelpOpen] = useState(false)
   const canvasserMapHelpRef = useRef<HTMLDivElement>(null)
   const canvasserListAreaPickerRef = useRef<HTMLDivElement>(null)
@@ -1244,7 +1252,7 @@ function App() {
               const o = r as Record<string, unknown>
               return {
                 actor_id: String(o.actor_id ?? ''),
-                actor_email: String(o.actor_email ?? ''),
+                actor_name: String(o.actor_name ?? o.actor_email ?? ''),
                 actor_role: String(o.actor_role ?? ''),
                 canvassed_marks: toNum(o.canvassed_marks),
                 petition_marks: toNum(o.petition_marks),
@@ -2215,6 +2223,37 @@ function App() {
     return () => window.cancelAnimationFrame(id)
   }, [isEditingGeofenceTitle])
 
+  useEffect(() => {
+    setMobileAppMenuOpen(false)
+  }, [activeAdminView, canvasserUiView, role])
+
+  useEffect(() => {
+    if (!mobileAppMenuOpen) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileAppMenuOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [mobileAppMenuOpen])
+
+  useEffect(() => {
+    if (!mobileAppMenuOpen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [mobileAppMenuOpen])
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 641px)')
+    const onChange = () => {
+      if (mq.matches) setMobileAppMenuOpen(false)
+    }
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
   const confirmGeofenceDelete = async () => {
     if (!selectedGeofenceId || role !== 'admin') return
     setIsGeofenceDeleting(true)
@@ -2502,20 +2541,187 @@ function App() {
     )
   }
 
+  const dashboardCanvassedPct = adminDashboardEffort
+    ? adminDashboardCanvassedPercent(adminDashboardEffort)
+    : 0
+
   return (
     <main className="app-shell">
       <header className="top-bar">
         <h1>Canvass</h1>
         <span className="top-bar-user-email">{session.user.email ?? ''}</span>
+        <div className="top-bar-actions-desktop">
+          {(role === 'admin' || role === 'canvasser') && (
+            <a className="support-link-button" href={supportHref}>
+              Support
+            </a>
+          )}
+          <button type="button" className="signout-button" onClick={() => void signOut()}>
+            Sign out
+          </button>
+        </div>
         {(role === 'admin' || role === 'canvasser') && (
-          <a className="support-link-button" href={supportHref}>
-            Support
-          </a>
+          <button
+            type="button"
+            className="mobile-app-menu-trigger"
+            aria-expanded={mobileAppMenuOpen}
+            aria-controls="mobile-app-menu"
+            aria-label={mobileAppMenuOpen ? 'Close menu' : 'Open menu'}
+            onClick={() => setMobileAppMenuOpen((open) => !open)}
+          >
+            <span className="mobile-app-menu-trigger-bar" aria-hidden />
+            <span className="mobile-app-menu-trigger-bar" aria-hidden />
+            <span className="mobile-app-menu-trigger-bar" aria-hidden />
+          </button>
         )}
-        <button type="button" className="signout-button" onClick={() => void signOut()}>
-          Sign out
-        </button>
       </header>
+
+      {mobileAppMenuOpen && (role === 'admin' || role === 'canvasser') ? (
+        <>
+          <button
+            type="button"
+            className="mobile-app-menu-backdrop"
+            tabIndex={-1}
+            aria-label="Close menu"
+            onClick={() => setMobileAppMenuOpen(false)}
+          />
+          <div
+            id="mobile-app-menu"
+            className="mobile-app-menu-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mobile-app-menu-title"
+          >
+            <div className="mobile-app-menu-header">
+              <h2 id="mobile-app-menu-title" className="mobile-app-menu-title">
+                Menu
+              </h2>
+              <button
+                type="button"
+                className="mobile-app-menu-close"
+                aria-label="Close menu"
+                onClick={() => setMobileAppMenuOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <nav className="mobile-app-menu-nav" aria-label="App pages">
+              {role === 'admin' ? (
+                <>
+                  <button
+                    type="button"
+                    className={
+                      activeAdminView === 'map'
+                        ? 'mobile-app-menu-nav-item is-active'
+                        : 'mobile-app-menu-nav-item'
+                    }
+                    onClick={() => {
+                      setGeofenceDeleteConfirmId(null)
+                      setActiveAdminView('map')
+                      setMobileAppMenuOpen(false)
+                    }}
+                  >
+                    Map
+                  </button>
+                  <button
+                    type="button"
+                    className={
+                      activeAdminView === 'dashboard'
+                        ? 'mobile-app-menu-nav-item is-active'
+                        : 'mobile-app-menu-nav-item'
+                    }
+                    onClick={() => {
+                      setGeofenceDeleteConfirmId(null)
+                      setActiveAdminView('dashboard')
+                      setMobileAppMenuOpen(false)
+                    }}
+                  >
+                    Dashboard
+                  </button>
+                  <button
+                    type="button"
+                    className={
+                      activeAdminView === 'access'
+                        ? 'mobile-app-menu-nav-item is-active'
+                        : 'mobile-app-menu-nav-item'
+                    }
+                    onClick={() => {
+                      setGeofenceDeleteConfirmId(null)
+                      setActiveAdminView('access')
+                      setMobileAppMenuOpen(false)
+                    }}
+                  >
+                    Admin Access
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className={
+                      canvasserUiView === 'map'
+                        ? 'mobile-app-menu-nav-item is-active'
+                        : 'mobile-app-menu-nav-item'
+                    }
+                    onClick={() => {
+                      setGeofenceDeleteConfirmId(null)
+                      setCanvasserUiView('map')
+                      setMobileAppMenuOpen(false)
+                    }}
+                  >
+                    Map
+                  </button>
+                  <button
+                    type="button"
+                    className={
+                      canvasserUiView === 'list'
+                        ? 'mobile-app-menu-nav-item is-active'
+                        : 'mobile-app-menu-nav-item'
+                    }
+                    onClick={() => {
+                      setGeofenceDeleteConfirmId(null)
+                      setCanvasserUiView('list')
+                      setMobileAppMenuOpen(false)
+                    }}
+                  >
+                    Address list
+                  </button>
+                  <button
+                    type="button"
+                    className={
+                      canvasserUiView === 'dashboard'
+                        ? 'mobile-app-menu-nav-item is-active'
+                        : 'mobile-app-menu-nav-item'
+                    }
+                    onClick={() => {
+                      setGeofenceDeleteConfirmId(null)
+                      setCanvasserUiView('dashboard')
+                      setMobileAppMenuOpen(false)
+                    }}
+                  >
+                    Dashboard
+                  </button>
+                </>
+              )}
+            </nav>
+            <div className="mobile-app-menu-footer">
+              <a className="mobile-app-menu-support-link" href={supportHref} onClick={() => setMobileAppMenuOpen(false)}>
+                Support
+              </a>
+              <button
+                type="button"
+                className="mobile-app-menu-signout"
+                onClick={() => {
+                  setMobileAppMenuOpen(false)
+                  void signOut()
+                }}
+              >
+                Sign out
+              </button>
+            </div>
+          </div>
+        </>
+      ) : null}
 
       {role === 'admin' && (
         <div className="map-toolbar-row">
@@ -4043,28 +4249,57 @@ function App() {
           ) : adminDashboardEffort ? (
             <>
               <div className="admin-dashboard-metrics">
-                <div className="admin-dashboard-metric-card">
-                  <h3 className="admin-dashboard-metric-title">Canvassed</h3>
-                  <p className="admin-dashboard-metric-value">
-                    <strong>{adminDashboardEffort.canvassed_count}</strong>
-                    <span className="admin-dashboard-metric-sep"> / </span>
-                    {adminDashboardEffort.total_addresses_in_areas}
-                  </p>
-                  <p className="admin-dashboard-metric-sub">
-                    {adminDashboardEffort.total_addresses_in_areas === 0
-                      ? '—'
-                      : `${Math.round(
-                          (adminDashboardEffort.canvassed_count /
-                            adminDashboardEffort.total_addresses_in_areas) *
-                            100,
-                        )}%`}
-                  </p>
+                <div className="admin-dashboard-metric-card admin-dashboard-metric-card--canvassed">
+                  <div className="admin-dashboard-metric-head">
+                    <h3 className="admin-dashboard-metric-title">Canvassed</h3>
+                    {adminDashboardEffort.total_addresses_in_areas === 0 ? (
+                      <span className="admin-dashboard-metric-chip admin-dashboard-metric-chip--muted">—</span>
+                    ) : (
+                      <span className="admin-dashboard-metric-chip">
+                        {dashboardCanvassedPct}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="admin-dashboard-metric-body">
+                    <span
+                      className="admin-dashboard-metric-k"
+                      aria-label={`${adminDashboardEffort.canvassed_count} of ${adminDashboardEffort.total_addresses_in_areas} addresses canvassed`}
+                    >
+                      {adminDashboardEffort.canvassed_count}
+                    </span>
+                    <span className="admin-dashboard-metric-slash" aria-hidden="true">
+                      /
+                    </span>
+                    <span className="admin-dashboard-metric-total" aria-hidden="true">
+                      {adminDashboardEffort.total_addresses_in_areas}
+                    </span>
+                  </div>
+                  <div
+                    className="admin-dashboard-metric-progress"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={dashboardCanvassedPct}
+                    aria-label="Share of addresses in areas that are canvassed"
+                  >
+                    <div
+                      className="admin-dashboard-metric-progress-fill"
+                      style={{ width: `${dashboardCanvassedPct}%` }}
+                    />
+                  </div>
                 </div>
                 <div className="admin-dashboard-metric-card admin-dashboard-metric-card--petition">
-                  <h3 className="admin-dashboard-metric-title">Petitions signed</h3>
-                  <p className="admin-dashboard-metric-value">
-                    <strong>{adminDashboardEffort.petition_signed_count}</strong>
-                  </p>
+                  <div className="admin-dashboard-metric-head">
+                    <h3 className="admin-dashboard-metric-title">Petitions signed</h3>
+                  </div>
+                  <div className="admin-dashboard-metric-body">
+                    <span
+                      className="admin-dashboard-metric-k"
+                      aria-label={`${adminDashboardEffort.petition_signed_count} petitions signed`}
+                    >
+                      {adminDashboardEffort.petition_signed_count}
+                    </span>
+                  </div>
                 </div>
               </div>
               <div className="admin-dashboard-leaderboard-head">
@@ -4099,7 +4334,7 @@ function App() {
                 >
                   <thead>
                     <tr>
-                      <th scope="col">Email</th>
+                      <th scope="col">Name</th>
                       <th scope="col">Role</th>
                       <th scope="col">Canvassed</th>
                       <th scope="col">Signatures</th>
@@ -4113,7 +4348,7 @@ function App() {
                     ) : (
                       adminDashboardLeaderboard.map((row) => (
                         <tr key={row.actor_id}>
-                          <td data-label="Email">{row.actor_email || row.actor_id}</td>
+                          <td data-label="Name">{row.actor_name || row.actor_id}</td>
                           <td data-label="Role">{row.actor_role}</td>
                           <td data-label="Canvassed">{row.canvassed_marks}</td>
                           <td data-label="Signatures">{row.petition_marks}</td>
