@@ -7,6 +7,8 @@ type UseViewportAddressesArgs = {
   sessionUserId?: string
   role: string
   viewport: ViewportBounds | null
+  /** When true, skip scheduling viewport address fetches (e.g. admin fit-to-all-areas animation). */
+  pauseViewportFetches?: boolean
   onSetAddresses: (rows: AddressRow[]) => void
   onSetHitViewportLimit: (value: boolean) => void
   onSetErrorMessage: (message: string) => void
@@ -16,11 +18,16 @@ export function useViewportAddresses({
   sessionUserId,
   role,
   viewport,
+  pauseViewportFetches = false,
   onSetAddresses,
   onSetHitViewportLimit,
   onSetErrorMessage,
 }: UseViewportAddressesArgs) {
   useEffect(() => {
+    if (pauseViewportFetches) {
+      return () => {}
+    }
+
     const fetchAddresses = async () => {
       if (!supabase || !sessionUserId || !APP_ROLES.has(role) || !viewport) {
         return
@@ -85,5 +92,13 @@ export function useViewportAddresses({
       void fetchAddresses()
     }, 220)
     return () => window.clearTimeout(timer)
-  }, [sessionUserId, role, viewport, onSetAddresses, onSetErrorMessage, onSetHitViewportLimit])
+  }, [
+    sessionUserId,
+    role,
+    viewport,
+    pauseViewportFetches,
+    onSetAddresses,
+    onSetErrorMessage,
+    onSetHitViewportLimit,
+  ])
 }

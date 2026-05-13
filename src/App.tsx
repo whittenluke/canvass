@@ -127,6 +127,10 @@ function parseStoredCanvasserViewport(raw: string | null): StoredCanvasserViewpo
 
 /** When an admin picks an area from the details list, fit the map to that polygon up to this zoom. */
 const ADMIN_AREA_DETAIL_FOCUS_MAX_ZOOM = 17
+/** End "exit single area" map latch when viewport is roughly regional or smaller zoom (see effects). */
+const ADMIN_MAP_EXIT_AREA_LATCH_MIN_LAT_SPAN = 0.105
+const ADMIN_MAP_EXIT_AREA_LATCH_MIN_LNG_SPAN = 0.16
+const ADMIN_MAP_EXIT_AREA_LATCH_FAILSAFE_MS = 3200
 
 function App() {
   const [role, setRole] = useState<string>('')
@@ -175,6 +179,8 @@ function App() {
   const mapRef = useRef<L.Map | null>(null)
   const [mapReadySequence, setMapReadySequence] = useState(0)
   const [dotsEnabled, setDotsEnabled] = useState(false)
+  /** After leaving a selected area (all-areas / map click-out), suppress dots + viewport fetches until zoom-out settles. */
+  const [adminExitAreaDetailMapLatch, setAdminExitAreaDetailMapLatch] = useState(false)
   const [addressPopupOpenId, setAddressPopupOpenId] = useState<string | null>(null)
   const [nearbyAddressSheet, setNearbyAddressSheet] = useState<{ memberIds: string[] } | null>(null)
   const [canvasserUiView, setCanvasserUiView] = useState<'map' | 'list'>('map')
@@ -298,10 +304,40 @@ function App() {
     sessionUserId: session?.user?.id,
     role,
     viewport,
+    pauseViewportFetches: role === 'admin' && adminExitAreaDetailMapLatch,
     onSetAddresses: setAddressesFromViewport,
     onSetHitViewportLimit: setHitViewportLimitFromViewport,
     onSetErrorMessage: setErrorMessageFromViewport,
   })
+
+  useEffect(() => {
+    if (role !== 'admin') {
+      setAdminExitAreaDetailMapLatch(false)
+    }
+  }, [role])
+
+  useEffect(() => {
+    if (!adminExitAreaDetailMapLatch || role !== 'admin') return
+    const timer = window.setTimeout(() => {
+      setAdminExitAreaDetailMapLatch(false)
+    }, ADMIN_MAP_EXIT_AREA_LATCH_FAILSAFE_MS)
+    return () => window.clearTimeout(timer)
+  }, [role, adminExitAreaDetailMapLatch])
+
+  useEffect(() => {
+    if (!adminExitAreaDetailMapLatch || role !== 'admin' || !viewport) return
+    const z = viewport.zoom ?? 0
+    const latSpan = viewport.north - viewport.south
+    const lngSpan = Math.abs(viewport.east - viewport.west)
+    if (
+      z < DOTS_VISIBLE_MIN_ZOOM_ADMIN ||
+      latSpan >= ADMIN_MAP_EXIT_AREA_LATCH_MIN_LAT_SPAN ||
+      lngSpan >= ADMIN_MAP_EXIT_AREA_LATCH_MIN_LNG_SPAN
+    ) {
+      setAdminExitAreaDetailMapLatch(false)
+    }
+  }, [role, adminExitAreaDetailMapLatch, viewport])
+
   const setGeofencesFromHook = useCallback((rows: GeofenceRow[]) => {
     setGeofences(rows)
   }, [])
@@ -501,6 +537,9 @@ function App() {
   /** Canvassers: only dots inside assigned areas. Admins: all in view, or only inside selected area when dots are on. */
   const addressesForMapDots = useMemo(() => {
     if (role !== 'canvasser') {
+      if (role === 'admin' && adminExitAreaDetailMapLatch) {
+        return []
+      }
       if (
         role === 'admin' &&
         dotsEnabled &&
@@ -538,6 +577,7 @@ function App() {
     canvasserEffectiveFocusGeofenceId,
     geofences,
     assignedGeofenceIdSet,
+    adminExitAreaDetailMapLatch,
   ])
   const addressClustersForMap = useMemo(() => {
     if (addressesForMapDots.length === 0) return []
@@ -1517,7 +1557,10 @@ function App() {
   const centerPoint = useMemo<[number, number]>(() => RURAL_HALL_CENTER, [])
   const isCloseZoom = (viewport?.zoom ?? 13) >= ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM
   const dotsVisibleMinZoom = role === 'admin' ? DOTS_VISIBLE_MIN_ZOOM_ADMIN : DOTS_VISIBLE_MIN_ZOOM_CANVASSER
-  const showAddressDots = dotsEnabled && (viewport?.zoom ?? 13) >= dotsVisibleMinZoom
+  const showAddressDots =
+    dotsEnabled &&
+    (viewport?.zoom ?? 13) >= dotsVisibleMinZoom &&
+    !(role === 'admin' && adminExitAreaDetailMapLatch)
 
   const patchCanvasserListAddress = useCallback((addressId: string, patch: Partial<AddressRow>) => {
     setCanvasserListAddresses((current) => {
@@ -2201,6 +2244,12 @@ function App() {
 
   const selectGeofenceId = (id: string, options?: { focusOnMap?: boolean }) => {
     setGeofenceDeleteConfirmId(null)
+    if (role === 'admin' && id) {
+      setAdminExitAreaDetailMapLatch(false)
+    }
+    if (role === 'admin' && !id) {
+      setAdminExitAreaDetailMapLatch(true)
+    }
     setSelectedGeofenceId(id)
     if (role === 'admin') {
       setAdminGeofencePanelExpanded(true)
