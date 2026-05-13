@@ -3947,7 +3947,7 @@ function App() {
                   </p>
                 </div>
                 <div className="admin-dashboard-metric-card admin-dashboard-metric-card--petition">
-                  <h3 className="admin-dashboard-metric-title">Petition signed</h3>
+                  <h3 className="admin-dashboard-metric-title">Signatures</h3>
                   <p className="admin-dashboard-metric-value">
                     <strong>{adminDashboardEffort.petition_signed_count}</strong>
                     <span className="admin-dashboard-metric-sep"> / </span>
@@ -3965,8 +3965,10 @@ function App() {
                 </div>
               </div>
               <div className="admin-dashboard-leaderboard-head">
-                <h3 className="admin-dashboard-leaderboard-title">Contributor leaderboard</h3>
-                <div className="admin-dashboard-range" role="group" aria-label="Leaderboard time range">
+                <h3 className="admin-dashboard-leaderboard-title" id="admin-dashboard-leaderboard-heading">
+                  Leaderboard
+                </h3>
+                <div className="admin-dashboard-range" role="group" aria-label="Time range for leaderboard">
                   <button
                     type="button"
                     className={
@@ -3974,7 +3976,7 @@ function App() {
                     }
                     onClick={() => setAdminDashboardLeaderboardRange('all')}
                   >
-                    All time
+                    All
                   </button>
                   <button
                     type="button"
@@ -3983,18 +3985,21 @@ function App() {
                     }
                     onClick={() => setAdminDashboardLeaderboardRange('30d')}
                   >
-                    Last 30 days
+                    30 days
                   </button>
                 </div>
               </div>
               <div className="profiles-table-wrap">
-                <table className="profiles-table admin-dashboard-leaderboard-table">
+                <table
+                  className="profiles-table admin-dashboard-leaderboard-table"
+                  aria-label="Contributor credits by person"
+                >
                   <thead>
                     <tr>
-                      <th>Contributor</th>
-                      <th>Role</th>
-                      <th>Canvassed</th>
-                      <th>Signatures</th>
+                      <th scope="col">Email</th>
+                      <th scope="col">Role</th>
+                      <th scope="col">Canvassed</th>
+                      <th scope="col">Signatures</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -4005,7 +4010,7 @@ function App() {
                     ) : (
                       adminDashboardLeaderboard.map((row) => (
                         <tr key={row.actor_id}>
-                          <td data-label="Contributor">{row.actor_email || row.actor_id}</td>
+                          <td data-label="Email">{row.actor_email || row.actor_id}</td>
                           <td data-label="Role">{row.actor_role}</td>
                           <td data-label="Canvassed">{row.canvassed_marks}</td>
                           <td data-label="Signatures">{row.petition_marks}</td>
