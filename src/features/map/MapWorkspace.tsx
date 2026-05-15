@@ -368,7 +368,6 @@ export function GeofenceDrawManager({
     }
     map.on(L.Draw.Event.DRAWSTART, block)
     map.on(L.Draw.Event.DRAWSTOP, unblock)
-    map.on(L.Draw.Event.CREATED, unblock)
     map.on(L.Draw.Event.EDITSTART, block)
     map.on(L.Draw.Event.EDITSTOP, unblock)
     map.on(L.Draw.Event.EDITED, unblock)
@@ -379,7 +378,6 @@ export function GeofenceDrawManager({
     return () => {
       map.off(L.Draw.Event.DRAWSTART, block)
       map.off(L.Draw.Event.DRAWSTOP, unblock)
-      map.off(L.Draw.Event.CREATED, unblock)
       map.off(L.Draw.Event.EDITSTART, block)
       map.off(L.Draw.Event.EDITSTOP, unblock)
       map.off(L.Draw.Event.EDITED, unblock)
@@ -450,9 +448,14 @@ export function GeofenceDrawManager({
 
   useEffect(() => {
     const handleCreated = (event: L.DrawEvents.Created) => {
+      blockGeofenceClearOnMapClickRef.current = true
       const layer = event.layer as L.Polygon
       const geometry = (layer.toGeoJSON() as GeoJSON.Feature<GeoJSON.Polygon>).geometry
-      onCreatedRef.current(geometry)
+      void Promise.resolve(onCreatedRef.current(geometry)).finally(() => {
+        window.requestAnimationFrame(() => {
+          blockGeofenceClearOnMapClickRef.current = false
+        })
+      })
     }
     const handleEdited = (event: L.DrawEvents.Edited) => {
       const updates: Array<{ id: string; geometry: GeoJSON.Polygon }> = []

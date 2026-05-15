@@ -2126,7 +2126,7 @@ function App() {
     const next = data as GeofenceRow
     setGeofences((current) => [...current, next])
     setGeofenceDeleteConfirmId(null)
-    setSelectedGeofenceId(next.id)
+    selectGeofenceId(next.id, { focusOnMap: true, fenceForFocus: next })
   }
 
   const handleGeofenceEdited = async (
@@ -2339,7 +2339,10 @@ function App() {
     })
   }
 
-  const selectGeofenceId = (id: string, options?: { focusOnMap?: boolean }) => {
+  const selectGeofenceId = (
+    id: string,
+    options?: { focusOnMap?: boolean; fenceForFocus?: GeofenceRow },
+  ) => {
     setGeofenceDeleteConfirmId(null)
     if (role === 'admin' && id) {
       setAdminExitAreaDetailMapLatch(false)
@@ -2352,7 +2355,7 @@ function App() {
       setAdminGeofencePanelExpanded(true)
     }
     if (role === 'admin' && options?.focusOnMap && id) {
-      const fence = geofences.find((g) => g.id === id)
+      const fence = options.fenceForFocus ?? geofences.find((g) => g.id === id)
       if (fence) {
         window.requestAnimationFrame(() => {
           window.requestAnimationFrame(() => {
