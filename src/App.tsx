@@ -860,7 +860,7 @@ function App() {
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- role-driven UI default */
     if (role === 'admin') {
-      setDotsEnabled(false)
+      setDotsEnabled(true)
     } else if (role === 'canvasser') {
       setDotsEnabled(true)
     }
