@@ -131,6 +131,17 @@ const ADMIN_AREA_DETAIL_FOCUS_MAX_ZOOM = 17
 const ADMIN_MAP_EXIT_AREA_LATCH_MIN_LAT_SPAN = 0.105
 const ADMIN_MAP_EXIT_AREA_LATCH_MIN_LNG_SPAN = 0.16
 const ADMIN_MAP_EXIT_AREA_LATCH_FAILSAFE_MS = 3200
+const VIEWPORT_BOUNDS_EPSILON = 1e-7
+
+function viewportBoundsEqual(a: ViewportBounds, b: ViewportBounds): boolean {
+  return (
+    a.zoom === b.zoom &&
+    Math.abs(a.south - b.south) < VIEWPORT_BOUNDS_EPSILON &&
+    Math.abs(a.north - b.north) < VIEWPORT_BOUNDS_EPSILON &&
+    Math.abs(a.west - b.west) < VIEWPORT_BOUNDS_EPSILON &&
+    Math.abs(a.east - b.east) < VIEWPORT_BOUNDS_EPSILON
+  )
+}
 
 function adminDashboardCanvassedPercent(row: AdminDashboardEffortSummaryRow): number {
   const t = row.total_addresses_in_areas
@@ -215,6 +226,7 @@ function App() {
   const canvasserAreasPanelRef = useRef<HTMLElement | null>(null)
   /** Block persisting viewport until fit/restore has run (avoids clobbering sessionStorage with default center/zoom before restore). */
   const canvasserAllowViewportPersistRef = useRef(false)
+  const viewportCommittedRef = useRef<ViewportBounds | null>(null)
   /** Last framing snapshot: distinguish map remount / assignment change from focus-only (restore vs fitBounds). */
   const canvasserViewportFramingRef = useRef<{
     mapSeq: number
@@ -735,6 +747,11 @@ function App() {
   )
   const onMapViewportChange = useCallback(
     (next: ViewportBounds) => {
+      const prev = viewportCommittedRef.current
+      if (prev && viewportBoundsEqual(prev, next)) {
+        return
+      }
+      viewportCommittedRef.current = next
       setViewport(next)
       persistCanvasserMapViewport(next)
     },

@@ -5,6 +5,112 @@ import { useMap, useMapEvents } from 'react-leaflet'
 import { VIEWPORT_LIMIT } from '../app/utils'
 import type { GeofenceRow, ViewportBounds } from '../app/types'
 
+type GeofencePolygonLayer = L.Polygon & {
+  geofenceId?: string
+  geofenceStructureKey?: string
+}
+
+type GeofenceStyleContext = {
+  fenceId: string
+  allowGeofenceSelect: boolean
+  enabled: boolean
+  assignedGeofenceIdList: string[]
+  canvasserFocusedGeofenceId: string
+  isMine: boolean
+}
+
+function fenceLatLngs(fence: GeofenceRow): L.LatLngExpression[] {
+  return fence.geometry.coordinates[0].map(([lng, lat]) => [lat, lng] as [number, number])
+}
+
+function fenceStructureKey(fence: GeofenceRow): string {
+  const ring = fence.geometry.coordinates[0] ?? []
+  let coordChecksum = 0
+  for (const pt of ring) {
+    coordChecksum += (pt[0] ?? 0) + (pt[1] ?? 0)
+  }
+  return `${fence.id}:${ring.length}:${coordChecksum.toFixed(6)}:${fence.name}`
+}
+
+function fenceLabelText(fence: GeofenceRow): string {
+  return fence.name.trim() || 'Unnamed area'
+}
+
+function getGeofencePathOptions(context: GeofenceStyleContext): L.PathOptions {
+  const { allowGeofenceSelect, enabled, assignedGeofenceIdList, canvasserFocusedGeofenceId, isMine } =
+    context
+  const canvasserPolygonPickMode = allowGeofenceSelect && !enabled
+
+  if (allowGeofenceSelect && enabled) {
+    return {
+      color: '#4c1d95',
+      weight: 3,
+      fillColor: '#c4b5fd',
+      fillOpacity: 0.34,
+    }
+  }
+  if (canvasserPolygonPickMode && isMine) {
+    const focused = canvasserFocusedGeofenceId
+    const isFocusedLayer = Boolean(focused && context.fenceId === focused)
+    const showBright = !focused || isFocusedLayer
+    if (showBright) {
+      return {
+        color: '#4c1d95',
+        weight: isFocusedLayer ? 4 : 3,
+        fillColor: '#c4b5fd',
+        fillOpacity: isFocusedLayer ? 0.42 : 0.34,
+      }
+    }
+    return {
+      color: '#7c3aed',
+      weight: 2.5,
+      fillColor: '#ddd6fe',
+      fillOpacity: 0.32,
+    }
+  }
+  if (assignedGeofenceIdList.length > 0) {
+    return {
+      color: isMine ? '#4c1d95' : '#94a3b8',
+      weight: isMine ? 3 : 1.5,
+      fillColor: isMine ? '#c4b5fd' : '#cbd5e1',
+      fillOpacity: isMine ? 0.34 : 0.07,
+    }
+  }
+  return {
+    color: '#94a3b8',
+    weight: 1.5,
+    fillColor: '#cbd5e1',
+    fillOpacity: 0.06,
+  }
+}
+
+function setFenceTooltip(layer: GeofencePolygonLayer, fence: GeofenceRow) {
+  const label = fenceLabelText(fence)
+  const tooltip = layer.getTooltip()
+  if (tooltip) {
+    const content = tooltip.getContent()
+    if (content instanceof HTMLElement) {
+      content.textContent = label
+      return
+    }
+    const el = tooltip.getElement()?.querySelector('.geofence-map-label-text')
+    if (el) {
+      el.textContent = label
+      return
+    }
+  }
+  const labelEl = document.createElement('span')
+  labelEl.className = 'geofence-map-label-text'
+  labelEl.textContent = label
+  layer.bindTooltip(labelEl, {
+    permanent: true,
+    direction: 'center',
+    className: 'geofence-map-label',
+    interactive: false,
+    opacity: 1,
+  })
+}
+
 export function MapViewportWatcher({
   onViewportChange,
 }: {
@@ -117,10 +223,42 @@ export function GeofenceDrawManager({
 }) {
   const map = useMap()
   const featureGroupRef = useRef<L.FeatureGroup | null>(null)
+  const layersByIdRef = useRef<Map<string, GeofencePolygonLayer>>(new Map())
   const drawControlRef = useRef<L.Control.Draw | null>(null)
   const blockGeofenceClearOnMapClickRef = useRef(false)
   /** Canvasser: fence click bubbles to map; skip one map.clear so onSelect('') does not undo fence focus. */
   const skipNextBubbledMapClearRef = useRef(false)
+  const onSelectRef = useRef(onSelect)
+  const onCreatedRef = useRef(onCreated)
+  const onEditedRef = useRef(onEdited)
+  const onDeletedRef = useRef(onDeleted)
+  const enabledRef = useRef(enabled)
+  const allowGeofenceSelectRef = useRef(allowGeofenceSelect)
+
+  useEffect(() => {
+    onSelectRef.current = onSelect
+    onCreatedRef.current = onCreated
+    onEditedRef.current = onEdited
+    onDeletedRef.current = onDeleted
+    enabledRef.current = enabled
+    allowGeofenceSelectRef.current = allowGeofenceSelect
+  })
+
+  const syncFenceClick = (layer: GeofencePolygonLayer, fenceId: string) => {
+    layer.off('click')
+    if (!allowGeofenceSelectRef.current) return
+    layer.on('click', (e: L.LeafletMouseEvent) => {
+      if (enabledRef.current) {
+        L.DomEvent.stopPropagation(e)
+      } else {
+        skipNextBubbledMapClearRef.current = true
+        window.requestAnimationFrame(() => {
+          skipNextBubbledMapClearRef.current = false
+        })
+      }
+      onSelectRef.current(fenceId)
+    })
+  }
 
   useEffect(() => {
     if (!featureGroupRef.current) {
@@ -129,89 +267,74 @@ export function GeofenceDrawManager({
     }
 
     const group = featureGroupRef.current
-    group.clearLayers()
+    const layersById = layersByIdRef.current
     const assignedSet = new Set(assignedGeofenceIdList)
-    const canvasserPolygonPickMode = allowGeofenceSelect && !enabled
-    geofences.forEach((fence) => {
-      const isMine = assignedSet.has(fence.id)
-      let color: string
-      let weight: number
-      let fillColor: string
-      let fillOpacity: number
-      if (allowGeofenceSelect && enabled) {
-        color = '#4c1d95'
-        weight = 3
-        fillColor = '#c4b5fd'
-        fillOpacity = 0.34
-      } else if (canvasserPolygonPickMode && isMine) {
-        const focused = canvasserFocusedGeofenceId
-        const isFocusedLayer = Boolean(focused && fence.id === focused)
-        const showBright = !focused || isFocusedLayer
-        if (showBright) {
-          color = '#4c1d95'
-          weight = isFocusedLayer ? 4 : 3
-          fillColor = '#c4b5fd'
-          fillOpacity = isFocusedLayer ? 0.42 : 0.34
-        } else {
-          // Other assigned areas: same purple family as focus, lighter so focus still pops
-          color = '#7c3aed'
-          weight = 2.5
-          fillColor = '#ddd6fe'
-          fillOpacity = 0.32
-        }
-      } else if (assignedGeofenceIdList.length > 0) {
-        color = isMine ? '#4c1d95' : '#94a3b8'
-        weight = isMine ? 3 : 1.5
-        fillColor = isMine ? '#c4b5fd' : '#cbd5e1'
-        fillOpacity = isMine ? 0.34 : 0.07
-      } else {
-        color = '#94a3b8'
-        weight = 1.5
-        fillColor = '#cbd5e1'
-        fillOpacity = 0.06
+    const nextIds = new Set(geofences.map((fence) => fence.id))
+
+    for (const [id, layer] of layersById) {
+      if (nextIds.has(id)) continue
+      group.removeLayer(layer)
+      layersById.delete(id)
+    }
+
+    for (const fence of geofences) {
+      const structureKey = fenceStructureKey(fence)
+      let layer = layersById.get(fence.id)
+
+      if (!layer) {
+        layer = L.polygon(fenceLatLngs(fence), {
+          pane: 'geofencePane',
+        }) as GeofencePolygonLayer
+        layer.geofenceId = fence.id
+        layer.geofenceStructureKey = structureKey
+        layer.setStyle(
+          getGeofencePathOptions({
+            fenceId: fence.id,
+            allowGeofenceSelect,
+            enabled,
+            assignedGeofenceIdList,
+            canvasserFocusedGeofenceId,
+            isMine: assignedSet.has(fence.id),
+          }),
+        )
+        setFenceTooltip(layer, fence)
+        syncFenceClick(layer, fence.id)
+        group.addLayer(layer)
+        layersById.set(fence.id, layer)
+        continue
       }
-      const layer = L.polygon(fence.geometry.coordinates[0].map(([lng, lat]) => [lat, lng] as [number, number]), {
-        pane: 'geofencePane',
-        color,
-        weight,
-        fillColor,
-        fillOpacity,
-      }) as L.Polygon & { geofenceId?: string }
-      layer.geofenceId = fence.id
-      if (allowGeofenceSelect) {
-        layer.on('click', (e: L.LeafletMouseEvent) => {
-          if (enabled) {
-            L.DomEvent.stopPropagation(e)
-          } else {
-            skipNextBubbledMapClearRef.current = true
-            window.requestAnimationFrame(() => {
-              skipNextBubbledMapClearRef.current = false
-            })
-          }
-          onSelect(fence.id)
-        })
+
+      if (layer.geofenceStructureKey !== structureKey) {
+        layer.setLatLngs(fenceLatLngs(fence))
+        layer.geofenceStructureKey = structureKey
+        setFenceTooltip(layer, fence)
       }
-      const labelEl = document.createElement('span')
-      labelEl.className = 'geofence-map-label-text'
-      labelEl.textContent = fence.name.trim() || 'Unnamed area'
-      layer.bindTooltip(labelEl, {
-        permanent: true,
-        direction: 'center',
-        className: 'geofence-map-label',
-        interactive: false,
-        opacity: 1,
-      })
-      group.addLayer(layer)
-    })
-  }, [
-    map,
-    geofences,
-    onSelect,
-    allowGeofenceSelect,
-    assignedGeofenceIdList,
-    enabled,
-    canvasserFocusedGeofenceId,
-  ])
+
+      syncFenceClick(layer, fence.id)
+    }
+    // assignedGeofenceIdList / canvasserFocusedGeofenceId affect styles only (separate effect).
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- structure sync on geometry/name/id changes
+  }, [map, geofences, allowGeofenceSelect, enabled])
+
+  useEffect(() => {
+    const assignedSet = new Set(assignedGeofenceIdList)
+    const layersById = layersByIdRef.current
+
+    for (const fence of geofences) {
+      const layer = layersById.get(fence.id)
+      if (!layer) continue
+      layer.setStyle(
+        getGeofencePathOptions({
+          fenceId: fence.id,
+          allowGeofenceSelect,
+          enabled,
+          assignedGeofenceIdList,
+          canvasserFocusedGeofenceId,
+          isMine: assignedSet.has(fence.id),
+        }),
+      )
+    }
+  }, [geofences, assignedGeofenceIdList, allowGeofenceSelect, enabled, canvasserFocusedGeofenceId])
 
   useEffect(() => {
     const block = () => {
@@ -251,13 +374,13 @@ export function GeofenceDrawManager({
     const onMapClick = () => {
       if (blockGeofenceClearOnMapClickRef.current) return
       if (skipNextBubbledMapClearRef.current) return
-      onSelect('')
+      onSelectRef.current('')
     }
     map.on('click', onMapClick)
     return () => {
       map.off('click', onMapClick)
     }
-  }, [map, allowGeofenceSelect, onSelect])
+  }, [map, allowGeofenceSelect])
 
   useEffect(() => {
     if (!featureGroupRef.current) return
@@ -306,25 +429,25 @@ export function GeofenceDrawManager({
     const handleCreated = (event: L.DrawEvents.Created) => {
       const layer = event.layer as L.Polygon
       const geometry = (layer.toGeoJSON() as GeoJSON.Feature<GeoJSON.Polygon>).geometry
-      onCreated(geometry)
+      onCreatedRef.current(geometry)
     }
     const handleEdited = (event: L.DrawEvents.Edited) => {
       const updates: Array<{ id: string; geometry: GeoJSON.Polygon }> = []
       event.layers.eachLayer((layer) => {
-        const polygon = layer as L.Polygon & { geofenceId?: string }
+        const polygon = layer as GeofencePolygonLayer
         if (!polygon.geofenceId) return
         const geometry = (polygon.toGeoJSON() as GeoJSON.Feature<GeoJSON.Polygon>).geometry
         updates.push({ id: polygon.geofenceId, geometry })
       })
-      if (updates.length > 0) onEdited(updates)
+      if (updates.length > 0) onEditedRef.current(updates)
     }
     const handleDeleted = (event: L.DrawEvents.Deleted) => {
       const ids: string[] = []
       event.layers.eachLayer((layer) => {
-        const polygon = layer as L.Polygon & { geofenceId?: string }
+        const polygon = layer as GeofencePolygonLayer
         if (polygon.geofenceId) ids.push(polygon.geofenceId)
       })
-      if (ids.length > 0) onDeleted(ids)
+      if (ids.length > 0) void onDeletedRef.current(ids)
     }
 
     map.on(L.Draw.Event.CREATED, handleCreated)
@@ -335,7 +458,7 @@ export function GeofenceDrawManager({
       map.off(L.Draw.Event.EDITED, handleEdited)
       map.off(L.Draw.Event.DELETED, handleDeleted)
     }
-  }, [map, onCreated, onEdited, onDeleted])
+  }, [map])
 
   return null
 }
