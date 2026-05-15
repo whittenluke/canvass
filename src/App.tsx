@@ -66,7 +66,8 @@ import './App.css'
 
 type ClusterBadgeStyle = 'todo' | 'canvassed' | 'petition'
 
-/** New icon per marker: Leaflet must not reuse one DivIcon instance across multiple markers. */
+const clusterCountIconCache = new Map<string, L.DivIcon>()
+
 function createClusterCountIcon(
   count: number,
   badgeStyle: ClusterBadgeStyle,
@@ -89,6 +90,21 @@ function createClusterCountIcon(
     iconSize: [size, size],
     iconAnchor: [half, half],
   })
+}
+
+/** Reuse DivIcon instances per count/style/compact — safe across multiple Leaflet markers. */
+function getClusterCountIcon(
+  count: number,
+  badgeStyle: ClusterBadgeStyle,
+  compactHit: boolean,
+): L.DivIcon {
+  const key = `${count}|${badgeStyle}|${compactHit ? 1 : 0}`
+  let icon = clusterCountIconCache.get(key)
+  if (!icon) {
+    icon = createClusterCountIcon(count, badgeStyle, compactHit)
+    clusterCountIconCache.set(key, icon)
+  }
+  return icon
 }
 
 /** v2: key is email + assignments only — not focused area. Sleep/resume restores one map view; switching focus always re-frames. */
@@ -154,6 +170,7 @@ function App() {
   const [addresses, setAddresses] = useState<AddressRow[]>([])
   const [errorMessage, setErrorMessage] = useState('')
   const [viewport, setViewport] = useState<ViewportBounds | null>(null)
+  const [clusteringViewport, setClusteringViewport] = useState<ViewportBounds | null>(null)
   const [hitViewportLimit, setHitViewportLimit] = useState(false)
   const [activeAdminView, setActiveAdminView] = useState<'map' | 'access' | 'dashboard'>('map')
   const [geofences, setGeofences] = useState<GeofenceRow[]>([])
@@ -601,7 +618,8 @@ function App() {
   ])
   const addressClustersForMap = useMemo(() => {
     if (addressesForMapDots.length === 0) return []
-    const zoom = viewport?.zoom ?? 13
+    const clusterViewport = clusteringViewport ?? viewport
+    const zoom = clusterViewport?.zoom ?? 13
 
     if (zoom >= ADDRESS_EXACT_POINT_CLUSTER_MIN_ZOOM) {
       const exact = clusterAddressesByExactPoint(addressesForMapDots)
@@ -610,19 +628,23 @@ function App() {
 
     const useProximityClustering =
       role !== 'admin' ||
-      !viewport ||
+      !clusterViewport ||
       zoom >= ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM
 
     if (!useProximityClustering) {
       const cellPixels = zoom <= 14 ? 72 : zoom <= 15 ? 56 : 48
-      const raw = clusterAddressesByViewportGrid(addressesForMapDots, viewport, cellPixels)
+      const raw = clusterAddressesByViewportGrid(
+        addressesForMapDots,
+        clusterViewport,
+        cellPixels,
+      )
       return sortClustersSinglesFirst(raw)
     }
 
     const linked = clusterAddressesByProximity(addressesForMapDots, ADDRESS_CLUSTER_MERGE_METERS)
     const merged = mergeClustersByCrossGap(linked, ADDRESS_CLUSTER_CROSS_GAP_METERS)
     return sortClustersSinglesFirst(merged)
-  }, [addressesForMapDots, role, viewport])
+  }, [addressesForMapDots, role, clusteringViewport, viewport])
   const canvasserListRowsLive = useMemo(() => {
     if (!canvasserListAddresses) return []
     return [...canvasserListAddresses].sort((a, b) =>
@@ -757,7 +779,6 @@ function App() {
     },
     [persistCanvasserMapViewport],
   )
-
   // Persist immediately when the tab goes hidden — reduces races where sleep locks before Leaflet emits moveend.
   useEffect(() => {
     if (typeof document === 'undefined') return
@@ -1591,6 +1612,21 @@ function App() {
     dotsEnabled &&
     (viewport?.zoom ?? 13) >= dotsVisibleMinZoom &&
     !(role === 'admin' && adminExitAreaDetailMapLatch)
+
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- keep clustering aligned with live map viewport */
+    if (
+      !viewport ||
+      !dotsEnabled ||
+      (viewport.zoom ?? 13) < dotsVisibleMinZoom ||
+      (role === 'admin' && adminExitAreaDetailMapLatch)
+    ) {
+      setClusteringViewport(null)
+      return
+    }
+    setClusteringViewport(viewport)
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [viewport, dotsEnabled, dotsVisibleMinZoom, role, adminExitAreaDetailMapLatch])
 
   const patchCanvasserListAddress = useCallback((addressId: string, patch: Partial<AddressRow>) => {
     setCanvasserListAddresses((current) => {
@@ -3400,7 +3436,7 @@ function App() {
                       <Marker
                         position={[centroidLat, centroidLng]}
                         pane="addressPane"
-                        icon={createClusterCountIcon(
+                        icon={getClusterCountIcon(
                           members.length,
                           clusterBadgeStyle,
                           !addressHitIsGenerous(viewport?.zoom ?? 13),

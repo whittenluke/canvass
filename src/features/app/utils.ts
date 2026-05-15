@@ -13,6 +13,7 @@ import type {
 export const RURAL_HALL_CENTER: [number, number] = [36.2413, -80.2937]
 export const APP_ROLES = new Set(['admin', 'canvasser'])
 export const VIEWPORT_LIMIT = 6000
+export const GEOFENCE_LABEL_MIN_ZOOM = 14
 export const DOTS_VISIBLE_MIN_ZOOM_CANVASSER = 15
 export const DOTS_VISIBLE_MIN_ZOOM_ADMIN = 15
 export const ADMIN_PROXIMITY_CLUSTER_MIN_ZOOM = 17

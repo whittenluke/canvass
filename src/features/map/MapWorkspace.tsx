@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import L from 'leaflet'
 import 'leaflet-draw'
 import { useMap, useMapEvents } from 'react-leaflet'
-import { VIEWPORT_LIMIT } from '../app/utils'
+import { GEOFENCE_LABEL_MIN_ZOOM, VIEWPORT_LIMIT } from '../app/utils'
 import type { GeofenceRow, ViewportBounds } from '../app/types'
 
 type GeofencePolygonLayer = L.Polygon & {
@@ -335,6 +335,20 @@ export function GeofenceDrawManager({
       )
     }
   }, [geofences, assignedGeofenceIdList, allowGeofenceSelect, enabled, canvasserFocusedGeofenceId])
+
+  useEffect(() => {
+    const syncLabelVisibility = () => {
+      const show = map.getZoom() >= GEOFENCE_LABEL_MIN_ZOOM
+      for (const layer of layersByIdRef.current.values()) {
+        layer.getTooltip()?.setOpacity(show ? 1 : 0)
+      }
+    }
+    map.on('zoom zoomend moveend', syncLabelVisibility)
+    syncLabelVisibility()
+    return () => {
+      map.off('zoom zoomend moveend', syncLabelVisibility)
+    }
+  }, [map, geofences])
 
   useEffect(() => {
     const block = () => {
