@@ -343,10 +343,19 @@ export function GeofenceDrawManager({
         layer.getTooltip()?.setOpacity(show ? 1 : 0)
       }
     }
-    map.on('zoom zoomend moveend', syncLabelVisibility)
+    const hideLabelsDuringZoom = () => {
+      for (const layer of layersByIdRef.current.values()) {
+        layer.getTooltip()?.setOpacity(0)
+      }
+    }
+    map.on('zoomstart', hideLabelsDuringZoom)
+    map.on('zoomend', syncLabelVisibility)
+    map.on('moveend', syncLabelVisibility)
     syncLabelVisibility()
     return () => {
-      map.off('zoom zoomend moveend', syncLabelVisibility)
+      map.off('zoomstart', hideLabelsDuringZoom)
+      map.off('zoomend', syncLabelVisibility)
+      map.off('moveend', syncLabelVisibility)
     }
   }, [map, geofences])
 
