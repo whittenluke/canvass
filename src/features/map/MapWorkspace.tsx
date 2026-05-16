@@ -17,6 +17,36 @@ type GeofenceStyleContext = {
   assignedGeofenceIdList: string[]
   canvasserFocusedGeofenceId: string
   isMine: boolean
+  /** Every in-area address is canvassed (total > 0). Uses map dot blue, darker than default purple. */
+  allCanvassed: boolean
+}
+
+/** Match address-dot canvassed blue (#2563eb / #1d4ed8). */
+const GEOFENCE_ALL_CANVASSED_STYLE = {
+  color: '#1d4ed8',
+  fillColor: '#2563eb',
+  fillOpacity: 0.42,
+} as const
+
+const GEOFENCE_ALL_CANVASSED_DIMMED_STYLE = {
+  color: '#2563eb',
+  fillColor: '#60a5fa',
+  fillOpacity: 0.34,
+} as const
+
+function withAllCanvassedStyle(
+  base: L.PathOptions,
+  allCanvassed: boolean,
+  dimmed: boolean,
+): L.PathOptions {
+  if (!allCanvassed) return base
+  const blue = dimmed ? GEOFENCE_ALL_CANVASSED_DIMMED_STYLE : GEOFENCE_ALL_CANVASSED_STYLE
+  return {
+    ...base,
+    color: blue.color,
+    fillColor: blue.fillColor,
+    fillOpacity: blue.fillOpacity,
+  }
 }
 
 function fenceLatLngs(fence: GeofenceRow): L.LatLngExpression[] {
@@ -37,51 +67,77 @@ function fenceLabelText(fence: GeofenceRow): string {
 }
 
 function getGeofencePathOptions(context: GeofenceStyleContext): L.PathOptions {
-  const { allowGeofenceSelect, enabled, assignedGeofenceIdList, canvasserFocusedGeofenceId, isMine } =
-    context
+  const {
+    allowGeofenceSelect,
+    enabled,
+    assignedGeofenceIdList,
+    canvasserFocusedGeofenceId,
+    isMine,
+    allCanvassed,
+  } = context
   const canvasserPolygonPickMode = allowGeofenceSelect && !enabled
 
   if (allowGeofenceSelect && enabled) {
-    return {
-      color: '#4c1d95',
-      weight: 3,
-      fillColor: '#c4b5fd',
-      fillOpacity: 0.34,
-    }
+    return withAllCanvassedStyle(
+      {
+        color: '#4c1d95',
+        weight: 3,
+        fillColor: '#c4b5fd',
+        fillOpacity: 0.34,
+      },
+      allCanvassed,
+      false,
+    )
   }
   if (canvasserPolygonPickMode && isMine) {
     const focused = canvasserFocusedGeofenceId
     const isFocusedLayer = Boolean(focused && context.fenceId === focused)
     const showBright = !focused || isFocusedLayer
     if (showBright) {
-      return {
-        color: '#4c1d95',
-        weight: isFocusedLayer ? 4 : 3,
-        fillColor: '#c4b5fd',
-        fillOpacity: isFocusedLayer ? 0.42 : 0.34,
-      }
+      return withAllCanvassedStyle(
+        {
+          color: '#4c1d95',
+          weight: isFocusedLayer ? 4 : 3,
+          fillColor: '#c4b5fd',
+          fillOpacity: isFocusedLayer ? 0.42 : 0.34,
+        },
+        allCanvassed,
+        false,
+      )
     }
-    return {
-      color: '#7c3aed',
-      weight: 2.5,
-      fillColor: '#ddd6fe',
-      fillOpacity: 0.32,
-    }
+    return withAllCanvassedStyle(
+      {
+        color: '#7c3aed',
+        weight: 2.5,
+        fillColor: '#ddd6fe',
+        fillOpacity: 0.32,
+      },
+      allCanvassed,
+      true,
+    )
   }
   if (assignedGeofenceIdList.length > 0) {
-    return {
-      color: isMine ? '#4c1d95' : '#94a3b8',
-      weight: isMine ? 3 : 1.5,
-      fillColor: isMine ? '#c4b5fd' : '#cbd5e1',
-      fillOpacity: isMine ? 0.34 : 0.07,
-    }
+    return withAllCanvassedStyle(
+      {
+        color: isMine ? '#4c1d95' : '#94a3b8',
+        weight: isMine ? 3 : 1.5,
+        fillColor: isMine ? '#c4b5fd' : '#cbd5e1',
+        fillOpacity: isMine ? 0.34 : 0.07,
+      },
+      allCanvassed,
+      false,
+    )
   }
-  return {
-    color: '#94a3b8',
-    weight: 1.5,
-    fillColor: '#cbd5e1',
-    fillOpacity: 0.06,
-  }
+  return withAllCanvassedStyle(
+    {
+      color: '#94a3b8',
+      weight: 1.5,
+      fillColor: '#cbd5e1',
+      fillOpacity: 0.06,
+    },
+    allCanvassed,
+    false,
+  )
 }
 
 function setFenceTooltip(layer: GeofencePolygonLayer, fence: GeofenceRow) {
@@ -205,6 +261,7 @@ export function GeofenceDrawManager({
   assignedGeofenceIdList,
   selectedGeofenceId,
   canvasserFocusedGeofenceId = '',
+  geofenceAllCanvassedIds,
   onCreated,
   onEdited,
   onDeleted,
@@ -216,6 +273,8 @@ export function GeofenceDrawManager({
   assignedGeofenceIdList: string[]
   selectedGeofenceId: string
   canvasserFocusedGeofenceId?: string
+  /** Geofence ids where every in-area address is canvassed (total > 0). */
+  geofenceAllCanvassedIds?: ReadonlySet<string>
   onCreated: (geometry: GeoJSON.Polygon) => void
   onEdited: (updates: Array<{ id: string; geometry: GeoJSON.Polygon }>) => void
   onDeleted: (ids: string[]) => void | Promise<boolean>
@@ -234,6 +293,21 @@ export function GeofenceDrawManager({
   const onDeletedRef = useRef(onDeleted)
   const enabledRef = useRef(enabled)
   const allowGeofenceSelectRef = useRef(allowGeofenceSelect)
+  const geofenceAllCanvassedIdsRef = useRef(geofenceAllCanvassedIds)
+  geofenceAllCanvassedIdsRef.current = geofenceAllCanvassedIds
+
+  const styleContextForFence = (
+    fenceId: string,
+    isMine: boolean,
+  ): GeofenceStyleContext => ({
+    fenceId,
+    allowGeofenceSelect,
+    enabled,
+    assignedGeofenceIdList,
+    canvasserFocusedGeofenceId,
+    isMine,
+    allCanvassed: geofenceAllCanvassedIdsRef.current?.has(fenceId) ?? false,
+  })
 
   useEffect(() => {
     onSelectRef.current = onSelect
@@ -287,16 +361,7 @@ export function GeofenceDrawManager({
         }) as GeofencePolygonLayer
         layer.geofenceId = fence.id
         layer.geofenceStructureKey = structureKey
-        layer.setStyle(
-          getGeofencePathOptions({
-            fenceId: fence.id,
-            allowGeofenceSelect,
-            enabled,
-            assignedGeofenceIdList,
-            canvasserFocusedGeofenceId,
-            isMine: assignedSet.has(fence.id),
-          }),
-        )
+        layer.setStyle(getGeofencePathOptions(styleContextForFence(fence.id, assignedSet.has(fence.id))))
         setFenceTooltip(layer, fence)
         syncFenceClick(layer, fence.id)
         group.addLayer(layer)
@@ -312,9 +377,8 @@ export function GeofenceDrawManager({
 
       syncFenceClick(layer, fence.id)
     }
-    // assignedGeofenceIdList / canvasserFocusedGeofenceId affect styles only (separate effect).
     // eslint-disable-next-line react-hooks/exhaustive-deps -- structure sync on geometry/name/id changes
-  }, [map, geofences, allowGeofenceSelect, enabled])
+  }, [map, geofences, allowGeofenceSelect, enabled, geofenceAllCanvassedIds])
 
   useEffect(() => {
     const assignedSet = new Set(assignedGeofenceIdList)
@@ -323,18 +387,16 @@ export function GeofenceDrawManager({
     for (const fence of geofences) {
       const layer = layersById.get(fence.id)
       if (!layer) continue
-      layer.setStyle(
-        getGeofencePathOptions({
-          fenceId: fence.id,
-          allowGeofenceSelect,
-          enabled,
-          assignedGeofenceIdList,
-          canvasserFocusedGeofenceId,
-          isMine: assignedSet.has(fence.id),
-        }),
-      )
+      layer.setStyle(getGeofencePathOptions(styleContextForFence(fence.id, assignedSet.has(fence.id))))
     }
-  }, [geofences, assignedGeofenceIdList, allowGeofenceSelect, enabled, canvasserFocusedGeofenceId])
+  }, [
+    geofences,
+    assignedGeofenceIdList,
+    allowGeofenceSelect,
+    enabled,
+    canvasserFocusedGeofenceId,
+    geofenceAllCanvassedIds,
+  ])
 
   useEffect(() => {
     const syncLabelVisibility = () => {

@@ -1274,20 +1274,6 @@
   cursor: pointer;
 }
 
-.address-cluster-hit--compact {
-  width: 30px;
-  height: 30px;
-}
-
-.address-cluster-hit--compact .address-cluster-hit__badge {
-  min-width: 20px;
-  height: 20px;
-  padding: 0 5px;
-  font-size: 10px;
-  line-height: 20px;
-  border-width: 1.5px;
-}
-
 .address-dot-visual--open {
   filter: drop-shadow(0 0 5px rgba(37, 99, 235, 0.85));
 }
@@ -1299,14 +1285,7 @@
 .address-cluster-leaflet-marker {
   background: transparent !important;
   border: none !important;
-}
-
-.address-cluster-hit {
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  pointer-events: auto;
+  pointer-events: none !important;
 }
 
 .address-cluster-hit__badge {
@@ -3666,8 +3645,9 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
     grid-template-rows: 1fr auto;
   }
 
-  /* One row: canvasser drawer is layered over the map; avoids empty row 2 + row-gap shrinking the map */
-  .map-page:has(> aside.canvasser-areas-panel) {
+  /* One row: mobile drawers layer over the map; avoids empty row 2 + row-gap shrinking the map */
+  .map-page:has(> aside.canvasser-areas-panel),
+  .map-page:has(> aside.admin-geofence-panel) {
     grid-template-rows: 1fr;
   }
 
@@ -3685,8 +3665,9 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
     grid-row: 2;
   }
 
-  /* Canvasser drawer sits over the map bottom instead of shrinking the map row */
-  .map-page > aside.canvasser-areas-panel {
+  /* Mobile drawers sit over the map bottom instead of shrinking the map row */
+  .map-page > aside.canvasser-areas-panel,
+  .map-page > aside.admin-geofence-panel {
     grid-column: 1;
     grid-row: 1;
     align-self: end;
@@ -3702,6 +3683,24 @@ button.progress-summary.canvasser-progress-summary--tap-all:focus-visible {
   .admin-geofence-panel {
     padding: 0;
     overflow: hidden;
+  }
+
+  .admin-geofence-panel.admin-geofence-panel--expanded {
+    max-height: min(58vh, 440px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .admin-geofence-panel--expanded .admin-geofence-expandable {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .admin-geofence-panel:not(.admin-geofence-panel--expanded) .admin-geofence-mobile-strip {
+    border-radius: 12px;
   }
 
   /* Single-area detail: save vertical space; assignee filter stays on desktop */

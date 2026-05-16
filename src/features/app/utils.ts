@@ -288,6 +288,21 @@ export function adminAddressHitRadiusPx(zoom: number, visualRadius: number): num
   return Math.max(4, visualRadius)
 }
 
+/** Pixel width/height for cluster count badge DivIcon (matches visible badge, not a large hit pad). */
+export function clusterBadgeIconDimensions(count: number): { width: number; height: number } {
+  const digits = String(count).length
+  const height = 24
+  const width = Math.max(24, 12 + digits * 8)
+  return { width, height }
+}
+
+/** Screen-pixel hit radius for multi-address cluster markers — tight when zoomed out so geofence polygons receive clicks. */
+export function clusterHitRadiusPx(count: number, zoom: number): number {
+  const digits = String(count).length
+  const base = addressHitIsGenerous(zoom) ? 12 : 9
+  return base + Math.max(0, digits - 1) * 2
+}
+
 export function hasResetPasswordIntentInUrl(): boolean {
   if (typeof window === 'undefined') return false
   const url = new URL(window.location.href)

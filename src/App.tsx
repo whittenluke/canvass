@@ -33,7 +33,6 @@ import {
   DOTS_VISIBLE_MIN_ZOOM_CANVASSER,
   RURAL_HALL_CENTER,
   accessDisplayName,
-  addressHitIsGenerous,
   addressInAssignedGeofences,
   adminAddressHitRadiusPx,
   buildStreetGroups,
@@ -41,6 +40,8 @@ import {
   clusterAddressesByExactPoint,
   clusterAddressesByProximity,
   clusterAddressesByViewportGrid,
+  clusterBadgeIconDimensions,
+  clusterHitRadiusPx,
   fetchAddressStatsInsidePolygon,
   mergeClustersByCrossGap,
   sortClustersSinglesFirst,
@@ -68,40 +69,28 @@ type ClusterBadgeStyle = 'todo' | 'canvassed' | 'petition'
 
 const clusterCountIconCache = new Map<string, L.DivIcon>()
 
-function createClusterCountIcon(
-  count: number,
-  badgeStyle: ClusterBadgeStyle,
-  compactHit: boolean,
-): L.DivIcon {
+function createClusterCountIcon(count: number, badgeStyle: ClusterBadgeStyle): L.DivIcon {
   const badgeClass =
     badgeStyle === 'petition'
       ? 'address-cluster-hit__badge address-cluster-hit__badge--all-petition'
       : badgeStyle === 'canvassed'
         ? 'address-cluster-hit__badge address-cluster-hit__badge--all-canvassed'
         : 'address-cluster-hit__badge'
-  const hitClass = compactHit
-    ? 'address-cluster-hit address-cluster-hit--compact'
-    : 'address-cluster-hit'
-  const size = compactHit ? 30 : 44
-  const half = size / 2
+  const { width, height } = clusterBadgeIconDimensions(count)
   return L.divIcon({
     className: 'address-cluster-leaflet-marker',
-    html: `<div class="${hitClass}" aria-hidden="true"><span class="${badgeClass}">${count}</span></div>`,
-    iconSize: [size, size],
-    iconAnchor: [half, half],
+    html: `<span class="${badgeClass}" aria-hidden="true">${count}</span>`,
+    iconSize: [width, height],
+    iconAnchor: [width / 2, height / 2],
   })
 }
 
-/** Reuse DivIcon instances per count/style/compact — safe across multiple Leaflet markers. */
-function getClusterCountIcon(
-  count: number,
-  badgeStyle: ClusterBadgeStyle,
-  compactHit: boolean,
-): L.DivIcon {
-  const key = `${count}|${badgeStyle}|${compactHit ? 1 : 0}`
+/** Reuse DivIcon instances per count/style — safe across multiple Leaflet markers. */
+function getClusterCountIcon(count: number, badgeStyle: ClusterBadgeStyle): L.DivIcon {
+  const key = `${count}|${badgeStyle}`
   let icon = clusterCountIconCache.get(key)
   if (!icon) {
-    icon = createClusterCountIcon(count, badgeStyle, compactHit)
+    icon = createClusterCountIcon(count, badgeStyle)
     clusterCountIconCache.set(key, icon)
   }
   return icon
@@ -216,7 +205,9 @@ function App() {
   /** After leaving a selected area (all-areas / map click-out), suppress dots + viewport fetches until zoom-out settles. */
   const [adminExitAreaDetailMapLatch, setAdminExitAreaDetailMapLatch] = useState(false)
   const [addressPopupOpenId, setAddressPopupOpenId] = useState<string | null>(null)
-  const [nearbyAddressSheet, setNearbyAddressSheet] = useState<{ memberIds: string[] } | null>(null)
+  const [nearbyAddressSheet, setNearbyAddressSheet] = useState<{ members: AddressRow[] } | null>(
+    null,
+  )
   const [canvasserUiView, setCanvasserUiView] = useState<'map' | 'list' | 'dashboard'>('map')
   const [canvasserListAddresses, setCanvasserListAddresses] = useState<AddressRow[] | null>(null)
   const [isCanvasserListLoading, setIsCanvasserListLoading] = useState(false)
@@ -526,6 +517,18 @@ function App() {
 
   useEffect(() => {
     if (role !== 'admin') return
+    const filter = adminAreaViewerEmailFilter.trim().toLowerCase()
+    if (!filter) return
+    const stillHasAreas = geofences.some(
+      (g) => (g.assigned_email ?? '').trim().toLowerCase() === filter,
+    )
+    if (!stillHasAreas) {
+      setAdminAreaViewerEmailFilter('')
+    }
+  }, [role, adminAreaViewerEmailFilter, geofences])
+
+  useEffect(() => {
+    if (role !== 'admin') return
     if (!selectedGeofenceId) return
     if (!adminGeofencesFiltered.some((g) => g.id === selectedGeofenceId)) {
       setSelectedGeofenceId('')
@@ -702,6 +705,35 @@ function App() {
       })
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
   }, [role, geofences, assignedGeofenceIdSet, canvasserListRowsLive])
+  const geofenceAllCanvassedIdSet = useMemo(() => {
+    const ids = new Set<string>()
+    if (role === 'admin' && adminGeofenceOverviewRows) {
+      for (const row of adminGeofenceOverviewRows) {
+        if (row.total_count > 0 && row.remaining_count <= 0) {
+          ids.add(row.geofence_id)
+        }
+      }
+    }
+    if (role === 'admin' && selectedGeofenceId && geofenceProgress) {
+      if (geofenceProgress.total > 0 && geofenceProgress.remaining <= 0) {
+        ids.add(selectedGeofenceId)
+      }
+    }
+    if (role === 'canvasser') {
+      for (const area of canvasserProgressByGeofence) {
+        if (area.total > 0 && area.canvassedDone >= area.total) {
+          ids.add(area.id)
+        }
+      }
+    }
+    return ids
+  }, [
+    role,
+    adminGeofenceOverviewRows,
+    selectedGeofenceId,
+    geofenceProgress,
+    canvasserProgressByGeofence,
+  ])
   const canvasserListAreaPickerLabel = useMemo(() => {
     if (!canvasserEffectiveFocusGeofenceId) return 'All areas'
     return (
@@ -833,11 +865,6 @@ function App() {
     const emails = new Set<string>()
     for (const g of geofences) {
       const e = (g.assigned_email ?? '').trim().toLowerCase()
-      if (e) emails.add(e)
-    }
-    for (const row of accessRows) {
-      if (row.role !== 'canvasser') continue
-      const e = row.email.trim().toLowerCase()
       if (e) emails.add(e)
     }
     return Array.from(emails)
@@ -2352,7 +2379,13 @@ function App() {
     }
     setSelectedGeofenceId(id)
     if (role === 'admin') {
-      setAdminGeofencePanelExpanded(true)
+      const isDesktopAdmin =
+        typeof window !== 'undefined' && window.matchMedia('(min-width: 901px)').matches
+      if (isDesktopAdmin) {
+        setAdminGeofencePanelExpanded(true)
+      } else if (!id) {
+        setAdminGeofencePanelExpanded(false)
+      }
     }
     if (role === 'admin' && options?.focusOnMap && id) {
       const fence = options.fenceForFocus ?? geofences.find((g) => g.id === id)
@@ -3193,6 +3226,7 @@ function App() {
                 assignedGeofenceIdList={assignedGeofenceIdList}
                 selectedGeofenceId={selectedGeofenceId}
                 canvasserFocusedGeofenceId={canvasserEffectiveFocusGeofenceId}
+                geofenceAllCanvassedIds={geofenceAllCanvassedIdSet}
                 onCreated={handleGeofenceCreated}
                 onEdited={handleGeofenceEdited}
                 onDeleted={handleGeofenceDeleted}
@@ -3221,6 +3255,9 @@ function App() {
                     const visualRadius = baseRadius + (isPopupOpen ? 4 : 0)
                     const visualWeight = (hasPetition || hasCanvassed ? 3 : 2) + (isPopupOpen ? 1 : 0)
                     const popupOpenHandlers = {
+                      click: (e: L.LeafletMouseEvent) => {
+                        L.DomEvent.stopPropagation(e)
+                      },
                       popupopen: () => setAddressPopupOpenId(address.id),
                       popupclose: () =>
                         setAddressPopupOpenId((prev) => (prev === address.id ? null : prev)),
@@ -3439,16 +3476,25 @@ function App() {
                       <Marker
                         position={[centroidLat, centroidLng]}
                         pane="addressPane"
-                        icon={getClusterCountIcon(
-                          members.length,
-                          clusterBadgeStyle,
-                          !addressHitIsGenerous(viewport?.zoom ?? 13),
-                        )}
+                        interactive={false}
+                        icon={getClusterCountIcon(members.length, clusterBadgeStyle)}
+                      />
+                      <CircleMarker
+                        center={[centroidLat, centroidLng]}
+                        pane="addressPane"
+                        radius={clusterHitRadiusPx(members.length, viewport?.zoom ?? 13)}
+                        pathOptions={{
+                          className: 'address-marker-hit address-cluster-marker-hit',
+                          color: '#000000',
+                          opacity: 0,
+                          fillColor: '#000000',
+                          fillOpacity: 0.001,
+                          weight: 0,
+                        }}
                         eventHandlers={{
-                          click: () => {
-                            setNearbyAddressSheet({
-                              memberIds: sortedMembers.map((m) => m.id),
-                            })
+                          click: (e) => {
+                            L.DomEvent.stopPropagation(e)
+                            setNearbyAddressSheet({ members: sortedMembers })
                           },
                         }}
                       />
@@ -3470,7 +3516,7 @@ function App() {
             </button>
             {nearbyAddressSheet && (
               <NearbyAddressSheet
-                memberIds={nearbyAddressSheet.memberIds}
+                members={nearbyAddressSheet.members}
                 addresses={addresses}
                 role={role}
                 geofences={geofences}

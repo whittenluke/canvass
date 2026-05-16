@@ -44,7 +44,7 @@ export function CollapsibleStreetBlock({
 }
 
 export function NearbyAddressSheet({
-  memberIds,
+  members,
   addresses,
   role,
   geofences,
@@ -53,7 +53,8 @@ export function NearbyAddressSheet({
   onToggleCanvassed,
   onToggleSignedPetition,
 }: {
-  memberIds: string[]
+  /** Snapshot from when the cluster opened; merged with live viewport rows when toggling status. */
+  members: AddressRow[]
   addresses: AddressRow[]
   role: string
   geofences: GeofenceRow[]
@@ -62,10 +63,10 @@ export function NearbyAddressSheet({
   onToggleCanvassed: (row: AddressRow) => void | Promise<void>
   onToggleSignedPetition: (row: AddressRow) => void | Promise<void>
 }) {
-  const rows = useMemo(
-    () => memberIds.map((id) => addresses.find((a) => a.id === id)).filter((a): a is AddressRow => a != null),
-    [memberIds, addresses],
-  )
+  const rows = useMemo(() => {
+    const liveById = new Map(addresses.map((a) => [a.id, a]))
+    return members.map((m) => liveById.get(m.id) ?? m)
+  }, [members, addresses])
   const sheetStreetGroups = useMemo(() => buildStreetGroups(rows), [rows])
 
   return (
