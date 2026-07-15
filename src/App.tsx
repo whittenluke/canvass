@@ -3515,7 +3515,7 @@ function App() {
                   </p>
                   <p className="hotzone-addresses-secondary-counts">
                     Project boundary: {adminHotZoneListProgress.boundaryCount}
-                    {' · '}
+                    <br />
                     500 ft buffer (outside site): {adminHotZoneListProgress.bufferCount}
                   </p>
                   <p className="hotzone-addresses-disclaimer">
