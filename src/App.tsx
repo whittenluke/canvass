@@ -21,6 +21,7 @@ import type {
   AdminMarkGeofenceSignedPetitionResultRow,
   GeofenceProgress,
   GeofenceRow,
+  HotZoneRow,
   ViewportBounds,
 } from './features/app/types'
 import {
@@ -50,8 +51,22 @@ import { useAuthFlow } from './features/auth/useAuthFlow'
 import { useAccessPanel } from './features/access/useAccessPanel'
 import { useViewportAddresses } from './features/addresses/useViewportAddresses'
 import { useVisibleGeofences } from './features/geofences/useVisibleGeofences'
+import { useVisibleHotZones } from './features/hotzones/useVisibleHotZones'
+import {
+  HOT_ZONE_BUFFER_FEET_CALC,
+  HOT_ZONE_OUTSIDE_FETCH_PAD_FEET,
+  bufferPolygonFeet,
+  classifyHotZoneAddresses,
+  downloadTextFile,
+  expandBBoxFeet,
+  exportHotZoneAddressesCsv,
+  polygonBBox,
+} from './features/hotzones/geometry'
+import { HotZoneAddressesMap } from './features/hotzones/HotZoneAddressesMap'
 import {
   GeofenceDrawManager,
+  HotZoneDrawManager,
+  HotZoneEditModeControl,
   GeofenceChevronLeftIcon,
   GeofenceMarkCanvassedIcon,
   GeofencePencilIcon,
@@ -161,8 +176,28 @@ function App() {
   const [viewport, setViewport] = useState<ViewportBounds | null>(null)
   const [clusteringViewport, setClusteringViewport] = useState<ViewportBounds | null>(null)
   const [hitViewportLimit, setHitViewportLimit] = useState(false)
-  const [activeAdminView, setActiveAdminView] = useState<'map' | 'access' | 'dashboard'>('map')
+  const [activeAdminView, setActiveAdminView] = useState<
+    'map' | 'hotzone' | 'access' | 'dashboard'
+  >('map')
   const [geofences, setGeofences] = useState<GeofenceRow[]>([])
+  const [activeHotZone, setActiveHotZone] = useState<HotZoneRow | null>(null)
+  const [hotZoneVisible, setHotZoneVisible] = useState(true)
+  const [hotZoneEditMode, setHotZoneEditMode] = useState(false)
+  const [hotZoneNameDraft, setHotZoneNameDraft] = useState('')
+  const [hotZoneMessage, setHotZoneMessage] = useState('')
+  const [adminHotZoneBoundaryAddresses, setAdminHotZoneBoundaryAddresses] = useState<AddressRow[]>(
+    [],
+  )
+  const [adminHotZoneBufferAddresses, setAdminHotZoneBufferAddresses] = useState<AddressRow[]>([])
+  /** Addresses outside the 500 ft buffer (still in fetch bbox) for map context dots. */
+  const [adminHotZoneOutsideAddresses, setAdminHotZoneOutsideAddresses] = useState<AddressRow[]>(
+    [],
+  )
+  const [adminHotZoneBufferGeometry, setAdminHotZoneBufferGeometry] =
+    useState<GeoJSON.Polygon | null>(null)
+  const [hotZoneAddressTab, setHotZoneAddressTab] = useState<'boundary' | 'buffer'>('buffer')
+  const [isAdminHotZoneListLoading, setIsAdminHotZoneListLoading] = useState(false)
+  const [adminHotZoneListFetchError, setAdminHotZoneListFetchError] = useState('')
   const [selectedGeofenceId, setSelectedGeofenceId] = useState('')
   const [geofenceNameDraft, setGeofenceNameDraft] = useState('')
   const [geofenceEmailDraft, setGeofenceEmailDraft] = useState('')
@@ -379,6 +414,34 @@ function App() {
     onSetGeofences: setGeofencesFromHook,
     onSetGeofenceMessage: setGeofenceMessageFromHook,
   })
+  const setActiveHotZoneFromHook = useCallback((row: HotZoneRow | null) => {
+    setActiveHotZone(row)
+  }, [])
+  const setHotZoneMessageFromHook = useCallback((message: string) => {
+    setHotZoneMessage(message)
+  }, [])
+  useVisibleHotZones({
+    sessionUserId: session?.user?.id,
+    role,
+    onSetActiveHotZone: setActiveHotZoneFromHook,
+    onSetHotZoneMessage: setHotZoneMessageFromHook,
+  })
+
+  useEffect(() => {
+    setHotZoneNameDraft(activeHotZone?.name ?? 'Hot Zone')
+  }, [activeHotZone?.id, activeHotZone?.name])
+
+  useEffect(() => {
+    if (role !== 'admin') {
+      setHotZoneEditMode(false)
+    }
+  }, [role])
+
+  const showHotZoneOnMap = useMemo(() => {
+    if (hotZoneEditMode) return true
+    if (role === 'canvasser') return Boolean(activeHotZone)
+    return hotZoneVisible && Boolean(activeHotZone)
+  }, [role, hotZoneEditMode, hotZoneVisible, activeHotZone])
   const selectedGeofence = useMemo(
     () => geofences.find((fence) => fence.id === selectedGeofenceId) ?? null,
     [geofences, selectedGeofenceId],
@@ -442,6 +505,9 @@ function App() {
     )
   }, [role, geofences, adminAreaViewerEmailFilter])
   const geofencesForMap = useMemo(() => {
+    if (role === 'admin' && hotZoneEditMode) {
+      return []
+    }
     if (role === 'canvasser') {
       return geofences.filter((g) => assignedGeofenceIdSet.has(g.id))
     }
@@ -449,7 +515,7 @@ function App() {
       return adminGeofencesFiltered
     }
     return geofences
-  }, [role, geofences, assignedGeofenceIdSet, adminGeofencesFiltered])
+  }, [role, geofences, assignedGeofenceIdSet, adminGeofencesFiltered, hotZoneEditMode])
   const geofenceDisplayNameForDelete = useMemo(() => {
     if (!selectedGeofence) return ''
     const trimmed = geofenceNameDraft.trim()
@@ -1093,6 +1159,138 @@ function App() {
   }, [role, assignedGeofenceIdList, geofences])
 
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- admin Hot Zone address list */
+    if (role !== 'admin' || activeAdminView !== 'hotzone' || !supabase) {
+      return
+    }
+    if (!activeHotZone) {
+      setAdminHotZoneBoundaryAddresses([])
+      setAdminHotZoneBufferAddresses([])
+      setAdminHotZoneOutsideAddresses([])
+      setAdminHotZoneBufferGeometry(null)
+      setAdminHotZoneListFetchError('')
+      setIsAdminHotZoneListLoading(false)
+      return
+    }
+
+    const bufferGeometry = bufferPolygonFeet(activeHotZone.geometry, HOT_ZONE_BUFFER_FEET_CALC)
+    const bboxSource = bufferGeometry ?? activeHotZone.geometry
+    const tightBbox = polygonBBox(bboxSource)
+    if (!tightBbox) {
+      setAdminHotZoneBoundaryAddresses([])
+      setAdminHotZoneBufferAddresses([])
+      setAdminHotZoneOutsideAddresses([])
+      setAdminHotZoneBufferGeometry(bufferGeometry)
+      setAdminHotZoneListFetchError('Could not read Hot Zone geometry.')
+      setIsAdminHotZoneListLoading(false)
+      return
+    }
+
+    // Pad past the buffer so the map has a wider ring of outside-buffer addresses.
+    const { minLat, maxLat, minLng, maxLng } = expandBBoxFeet(
+      tightBbox,
+      HOT_ZONE_OUTSIDE_FETCH_PAD_FEET,
+    )
+    setAdminHotZoneBufferGeometry(bufferGeometry)
+
+    let cancelled = false
+    setIsAdminHotZoneListLoading(true)
+    setAdminHotZoneListFetchError('')
+
+    const run = async () => {
+      const byId = new Map<string, AddressRow>()
+      let from = 0
+      const pageSize = 1000
+      let done = false
+      while (!done && !cancelled) {
+        const { data, error } = await supabase
+          .from('addresses')
+          .select('id,full_address,lat,long,canvassed,signed_petition')
+          .gte('lat', minLat)
+          .lte('lat', maxLat)
+          .gte('long', minLng)
+          .lte('long', maxLng)
+          .range(from, from + pageSize - 1)
+        if (error) {
+          if (!cancelled) {
+            setAdminHotZoneListFetchError(error.message)
+            setAdminHotZoneBoundaryAddresses([])
+            setAdminHotZoneBufferAddresses([])
+            setAdminHotZoneOutsideAddresses([])
+            setIsAdminHotZoneListLoading(false)
+          }
+          break
+        }
+        const rows = (data as AddressRow[]) ?? []
+        for (const row of rows) {
+          if (!byId.has(row.id)) byId.set(row.id, row)
+        }
+        if (rows.length < pageSize) done = true
+        else from += pageSize
+      }
+      if (!cancelled) {
+        const candidates = Array.from(byId.values())
+        const classified = classifyHotZoneAddresses(
+          candidates,
+          activeHotZone.geometry,
+          bufferGeometry,
+        )
+        setAdminHotZoneOutsideAddresses(classified.outsideBuffer)
+        setAdminHotZoneBoundaryAddresses(classified.inBoundary)
+        setAdminHotZoneBufferAddresses(classified.inBufferOnly)
+        setIsAdminHotZoneListLoading(false)
+      }
+    }
+
+    void run()
+    /* eslint-enable react-hooks/set-state-in-effect */
+    return () => {
+      cancelled = true
+    }
+  }, [role, activeAdminView, activeHotZone, supabase])
+
+  const adminHotZoneListRowsLive = useMemo(() => {
+    const rows =
+      hotZoneAddressTab === 'boundary'
+        ? adminHotZoneBoundaryAddresses
+        : adminHotZoneBufferAddresses
+    return [...rows].sort((a, b) => a.full_address.localeCompare(b.full_address))
+  }, [hotZoneAddressTab, adminHotZoneBoundaryAddresses, adminHotZoneBufferAddresses])
+
+  const adminHotZoneStreetGroups = useMemo(
+    () => buildStreetGroups(adminHotZoneListRowsLive),
+    [adminHotZoneListRowsLive],
+  )
+
+  const adminHotZoneListProgress = useMemo(() => {
+    const rows = adminHotZoneListRowsLive
+    const total = rows.length
+    const canvassedDone = rows.filter((r) => r.canvassed).length
+    const petitionDone = rows.filter((r) => r.signed_petition).length
+    return {
+      total,
+      canvassedDone,
+      petitionDone,
+      canvassedPercent: total === 0 ? 0 : Math.round((canvassedDone / total) * 100),
+      boundaryCount: adminHotZoneBoundaryAddresses.length,
+      bufferCount: adminHotZoneBufferAddresses.length,
+    }
+  }, [
+    adminHotZoneListRowsLive,
+    adminHotZoneBoundaryAddresses.length,
+    adminHotZoneBufferAddresses.length,
+  ])
+
+  const exportActiveHotZoneAddresses = useCallback(() => {
+    const sourceView =
+      hotZoneAddressTab === 'boundary' ? 'Project Boundary' : '500 ft Buffer'
+    const csv = exportHotZoneAddressesCsv(adminHotZoneListRowsLive, sourceView)
+    const stamp = new Date().toISOString().slice(0, 10)
+    const slug = hotZoneAddressTab === 'boundary' ? 'project-boundary' : '500ft-buffer'
+    downloadTextFile(`hot-zone-${slug}-${stamp}.csv`, csv)
+  }, [hotZoneAddressTab, adminHotZoneListRowsLive])
+
+  useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- selected geofence controls local draft state */
     if (!selectedGeofence) {
       setGeofenceProgress(null)
@@ -1669,6 +1867,21 @@ function App() {
     })
   }, [])
 
+  const patchAdminHotZoneListAddress = useCallback((addressId: string, patch: Partial<AddressRow>) => {
+    const patchList = (current: AddressRow[]) => {
+      let hit = false
+      const next = current.map((row) => {
+        if (row.id !== addressId) return row
+        hit = true
+        return { ...row, ...patch }
+      })
+      return hit ? next : current
+    }
+    setAdminHotZoneBoundaryAddresses(patchList)
+    setAdminHotZoneBufferAddresses(patchList)
+    setAdminHotZoneOutsideAddresses(patchList)
+  }, [])
+
   const restoreCanvasserListAddress = useCallback((row: AddressRow) => {
     setCanvasserListAddresses((current) => {
       if (!current) return current
@@ -1792,6 +2005,9 @@ function App() {
     if (role === 'canvasser') {
       patchCanvasserListAddress(address.id, { canvassed: nextState })
     }
+    if (role === 'admin') {
+      patchAdminHotZoneListAddress(address.id, { canvassed: nextState })
+    }
 
     const { error } =
       role === 'admin'
@@ -1828,6 +2044,9 @@ function App() {
       )
       if (role === 'canvasser') {
         patchCanvasserListAddress(address.id, { canvassed: address.canvassed })
+      }
+      if (role === 'admin') {
+        patchAdminHotZoneListAddress(address.id, { canvassed: address.canvassed })
       }
       setErrorMessage(error.message)
     }
@@ -1963,6 +2182,9 @@ function App() {
     if (role === 'canvasser') {
       patchCanvasserListAddress(address.id, { signed_petition: nextState })
     }
+    if (role === 'admin') {
+      patchAdminHotZoneListAddress(address.id, { signed_petition: nextState })
+    }
 
     const { error } =
       role === 'admin'
@@ -1999,6 +2221,9 @@ function App() {
       )
       if (role === 'canvasser') {
         patchCanvasserListAddress(address.id, { signed_petition: address.signed_petition })
+      }
+      if (role === 'admin') {
+        patchAdminHotZoneListAddress(address.id, { signed_petition: address.signed_petition })
       }
       setErrorMessage(error.message)
       return
@@ -2193,6 +2418,63 @@ function App() {
       setGeofenceProgress(null)
     }
     return true
+  }
+
+  const handleHotZoneCreated = async (geometry: GeoJSON.Polygon) => {
+    if (!supabase || role !== 'admin') return
+    const name = hotZoneNameDraft.trim() || 'Hot Zone'
+    const { data, error } = await supabase.rpc('admin_upsert_active_hot_zone', {
+      p_name: name,
+      p_geometry: geometry,
+    })
+    if (error) {
+      setHotZoneMessage(error.message)
+      return
+    }
+    const next = data as HotZoneRow
+    setActiveHotZone(next)
+    setHotZoneNameDraft(next.name)
+    setHotZoneMessage('Hot Zone saved.')
+  }
+
+  const handleHotZoneEdited = async (id: string, geometry: GeoJSON.Polygon) => {
+    if (!supabase || role !== 'admin') return
+    const { error } = await supabase.rpc('admin_update_hot_zone_geometry', {
+      p_hot_zone_id: id,
+      p_geometry: geometry,
+    })
+    if (error) {
+      setHotZoneMessage(error.message)
+      return
+    }
+    setActiveHotZone((current) => (current && current.id === id ? { ...current, geometry } : current))
+  }
+
+  const handleHotZoneDeleted = async (id: string) => {
+    if (!supabase || role !== 'admin') return
+    const { error } = await supabase.rpc('admin_delete_hot_zone', { p_hot_zone_id: id })
+    if (error) {
+      setHotZoneMessage(error.message)
+      return
+    }
+    setActiveHotZone(null)
+    setHotZoneMessage('Hot Zone deleted.')
+  }
+
+  const persistHotZoneName = async () => {
+    if (!supabase || role !== 'admin' || !activeHotZone) return
+    const name = hotZoneNameDraft.trim() || 'Hot Zone'
+    if (name === (activeHotZone.name.trim() || 'Hot Zone')) return
+    const { error } = await supabase.rpc('admin_update_hot_zone_details', {
+      p_hot_zone_id: activeHotZone.id,
+      p_name: name,
+    })
+    if (error) {
+      setHotZoneMessage(error.message)
+      return
+    }
+    setActiveHotZone((current) => (current ? { ...current, name } : current))
+    setHotZoneMessage('Hot Zone name saved.')
   }
 
   const flushGeofenceTitleDebounce = useCallback(() => {
@@ -2716,6 +2998,22 @@ function App() {
                   <button
                     type="button"
                     className={
+                      activeAdminView === 'hotzone'
+                        ? 'mobile-app-menu-nav-item is-active'
+                        : 'mobile-app-menu-nav-item'
+                    }
+                    onClick={() => {
+                      setGeofenceDeleteConfirmId(null)
+                      setHotZoneEditMode(false)
+                      setActiveAdminView('hotzone')
+                      setMobileAppMenuOpen(false)
+                    }}
+                  >
+                    Hot Zone Addresses
+                  </button>
+                  <button
+                    type="button"
+                    className={
                       activeAdminView === 'dashboard'
                         ? 'mobile-app-menu-nav-item is-active'
                         : 'mobile-app-menu-nav-item'
@@ -2825,6 +3123,17 @@ function App() {
               }}
             >
               Map
+            </button>
+            <button
+              type="button"
+              className={activeAdminView === 'hotzone' ? 'view-tab active' : 'view-tab'}
+              onClick={() => {
+                setGeofenceDeleteConfirmId(null)
+                setHotZoneEditMode(false)
+                setActiveAdminView('hotzone')
+              }}
+            >
+              Hot Zone Addresses
             </button>
             <button
               type="button"
@@ -3133,6 +3442,216 @@ function App() {
             </div>
           )}
         </section>
+      ) : role === 'admin' && activeAdminView === 'hotzone' ? (
+        <section className="canvasser-list-page hotzone-addresses-page" aria-label="Hot Zone Addresses">
+          <div className="canvasser-list-toolbar hotzone-addresses-toolbar">
+            <h2 className="canvasser-list-title">Hot Zone Addresses</h2>
+            <button
+              type="button"
+              className="status-button"
+              disabled={!activeHotZone || isAdminHotZoneListLoading || adminHotZoneListRowsLive.length === 0}
+              onClick={exportActiveHotZoneAddresses}
+            >
+              Export CSV
+            </button>
+          </div>
+          {hotZoneMessage ? <p className="access-message">{hotZoneMessage}</p> : null}
+          {!activeHotZone ? (
+            <p className="canvasser-list-empty">
+              No project boundary drawn yet. Open Map, enter Hot Zone edit mode, and draw the
+              project site polygon.
+            </p>
+          ) : (
+            <>
+              <div className="hotzone-addresses-tabs" role="tablist" aria-label="Hot Zone address views">
+                <button
+                  type="button"
+                  role="tab"
+                  id="hotzone-tab-buffer"
+                  aria-selected={hotZoneAddressTab === 'buffer'}
+                  className={
+                    hotZoneAddressTab === 'buffer'
+                      ? 'hotzone-addresses-tab is-active'
+                      : 'hotzone-addresses-tab'
+                  }
+                  onClick={() => setHotZoneAddressTab('buffer')}
+                >
+                  500 ft Buffer
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  id="hotzone-tab-boundary"
+                  aria-selected={hotZoneAddressTab === 'boundary'}
+                  className={
+                    hotZoneAddressTab === 'boundary'
+                      ? 'hotzone-addresses-tab is-active'
+                      : 'hotzone-addresses-tab'
+                  }
+                  onClick={() => setHotZoneAddressTab('boundary')}
+                >
+                  Project Boundary
+                </button>
+              </div>
+
+              <div
+                className="canvasser-list-progress-wrap"
+                role="group"
+                aria-label="Hot Zone address counts"
+              >
+                <div className="canvasser-list-progress-card">
+                  <p className="canvasser-list-progress-scope hotzone-addresses-primary-count">
+                    {hotZoneAddressTab === 'buffer' ? (
+                      <>
+                        Addresses within 500 feet:{' '}
+                        <strong>{adminHotZoneListProgress.bufferCount}</strong>
+                      </>
+                    ) : (
+                      <>
+                        Addresses inside project boundary:{' '}
+                        <strong>{adminHotZoneListProgress.boundaryCount}</strong>
+                      </>
+                    )}
+                  </p>
+                  <p className="hotzone-addresses-secondary-counts">
+                    Project boundary: {adminHotZoneListProgress.boundaryCount}
+                    {' · '}
+                    500 ft buffer (outside site): {adminHotZoneListProgress.bufferCount}
+                  </p>
+                  <p className="hotzone-addresses-disclaimer">
+                    500-foot results are estimated from the drawn project boundary.
+                  </p>
+                  <div className="canvasser-list-metric">
+                    <div className="canvasser-list-metric-head">
+                      <span className="canvasser-list-metric-label" id="admin-hz-list-m-canvassed">
+                        Canvassed (this tab)
+                      </span>
+                      <span className="canvasser-list-metric-pct">
+                        {adminHotZoneListProgress.canvassedPercent}%
+                      </span>
+                    </div>
+                    <p className="canvasser-list-metric-caption">
+                      {adminHotZoneListProgress.canvassedDone} of {adminHotZoneListProgress.total}{' '}
+                      addresses
+                    </p>
+                    <div
+                      className="canvasser-list-metric-rail"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={adminHotZoneListProgress.canvassedPercent}
+                      aria-labelledby="admin-hz-list-m-canvassed"
+                    >
+                      <div
+                        className="canvasser-list-metric-fill canvasser-list-metric-fill--canvassed"
+                        style={{ width: `${adminHotZoneListProgress.canvassedPercent}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="canvasser-list-metric canvasser-list-metric--petition">
+                    <div className="canvasser-list-metric-head">
+                      <span className="canvasser-list-metric-label" id="admin-hz-list-m-petition">
+                        Signatures (this tab)
+                      </span>
+                      <span className="canvasser-list-metric-pct">
+                        {adminHotZoneListProgress.petitionDone}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <HotZoneAddressesMap
+                boundary={activeHotZone.geometry}
+                bufferGeometry={adminHotZoneBufferGeometry}
+                outsideAddresses={adminHotZoneOutsideAddresses}
+                highlightedAddresses={adminHotZoneListRowsLive}
+                onToggleCanvassed={(address) => void toggleCanvassed(address)}
+                onToggleSignedPetition={(address) =>
+                  void toggleSignedPetition(address, { fromAddressMapPopup: true })
+                }
+              />
+
+              {isAdminHotZoneListLoading ? (
+                <p className="canvasser-list-empty">Loading addresses…</p>
+              ) : adminHotZoneListFetchError ? (
+                <p className="error-banner">{adminHotZoneListFetchError}</p>
+              ) : adminHotZoneListRowsLive.length === 0 ? (
+                <p className="canvasser-list-empty">
+                  {hotZoneAddressTab === 'buffer'
+                    ? 'No addresses found within 500 feet of the project boundary (outside the site).'
+                    : 'No addresses found inside the project boundary.'}
+                </p>
+              ) : (
+                <div className="canvasser-list-body">
+                  {adminHotZoneStreetGroups.map((group) => {
+                    const n = group.rows.length
+                    const c = group.rows.filter((r) => r.canvassed).length
+                    const p = group.rows.filter((r) => r.signed_petition).length
+                    return (
+                      <CollapsibleStreetBlock
+                        key={group.sortKey}
+                        blockClassName="canvasser-street-block"
+                        defaultOpen={false}
+                        summaryClassName="canvasser-street-summary"
+                        nameClassName="canvasser-street-name"
+                        metaClassName="canvasser-street-count"
+                        heading={group.heading}
+                        meta={
+                          <span
+                            className="street-block-stats"
+                            aria-label={`${c} of ${n} canvassed, ${p} of ${n} signed`}
+                          >
+                            <span className="street-block-stat-row">
+                              <span className="street-block-stat-label">Canvassed</span>
+                              <span className="street-block-stat-value">
+                                <strong>{c}</strong>
+                                <span className="street-block-stat-slash">/</span>
+                                <span className="street-block-stat-den">{n}</span>
+                              </span>
+                            </span>
+                            <span className="street-block-stat-row">
+                              <span className="street-block-stat-label">Signed</span>
+                              <span className="street-block-stat-value">
+                                <strong>{p}</strong>
+                                <span className="street-block-stat-slash">/</span>
+                                <span className="street-block-stat-den">{n}</span>
+                              </span>
+                            </span>
+                          </span>
+                        }
+                      >
+                        <ul className="canvasser-street-ul">
+                          {group.rows.map((address) => (
+                            <li key={address.id} className="canvasser-list-row">
+                              <span className="canvasser-list-address">{address.full_address}</span>
+                              <div className="canvasser-list-row-actions">
+                                <button
+                                  type="button"
+                                  className="canvasser-list-action"
+                                  onClick={() => void toggleCanvassed(address)}
+                                >
+                                  {address.canvassed ? 'Mark uncanvassed' : 'Mark canvassed'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="canvasser-list-action"
+                                  onClick={() => void toggleSignedPetition(address)}
+                                >
+                                  {address.signed_petition ? 'Clear petition' : 'Signed petition'}
+                                </button>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </CollapsibleStreetBlock>
+                    )
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </section>
       ) : (role === 'admin' && activeAdminView === 'map') ||
         (role === 'canvasser' && canvasserUiView === 'map') ? (
         <section className="map-page">
@@ -3219,21 +3738,47 @@ function App() {
               <MapViewportWatcher onViewportChange={onMapViewportChange} />
               <GeofenceDrawManager
                 geofences={geofencesForMap}
-                enabled={role === 'admin'}
+                enabled={role === 'admin' && !hotZoneEditMode}
                 allowGeofenceSelect={
-                  role === 'admin' ||
-                  (role === 'canvasser' && assignedGeofenceIdList.length > 1)
+                  !hotZoneEditMode &&
+                  (role === 'admin' ||
+                    (role === 'canvasser' && assignedGeofenceIdList.length > 1))
                 }
                 assignedGeofenceIdList={assignedGeofenceIdList}
-                selectedGeofenceId={selectedGeofenceId}
+                selectedGeofenceId={hotZoneEditMode ? '' : selectedGeofenceId}
                 canvasserFocusedGeofenceId={canvasserEffectiveFocusGeofenceId}
                 geofenceAllCanvassedIds={geofenceAllCanvassedIdSet}
-                labelsEnabled={geofenceLabelsEnabled}
+                labelsEnabled={geofenceLabelsEnabled && !hotZoneEditMode}
                 onCreated={handleGeofenceCreated}
                 onEdited={handleGeofenceEdited}
                 onDeleted={handleGeofenceDeleted}
                 onSelect={handleGeofenceMapPick}
               />
+              <HotZoneDrawManager
+                hotZone={activeHotZone}
+                visible={showHotZoneOnMap}
+                editMode={role === 'admin' && hotZoneEditMode}
+                onCreated={handleHotZoneCreated}
+                onEdited={handleHotZoneEdited}
+                onDeleted={handleHotZoneDeleted}
+              />
+              {role === 'admin' ? (
+                <HotZoneEditModeControl
+                  editMode={hotZoneEditMode}
+                  onToggle={() => {
+                    setHotZoneEditMode((open) => {
+                      const next = !open
+                      if (next) {
+                        setSelectedGeofenceId('')
+                        setGeofenceDeleteConfirmId(null)
+                        setAdminGeofencePanelExpanded(true)
+                        setHotZoneMessage('')
+                      }
+                      return next
+                    })
+                  }}
+                />
+              ) : null}
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -3505,6 +4050,25 @@ function App() {
                 })}
             </MapContainer>
             <div className="map-icon-controls">
+              {role === 'admin' ? (
+                <button
+                  type="button"
+                  className={`map-icon-control${hotZoneVisible || hotZoneEditMode ? '' : ' map-icon-control--off'}`}
+                  title={
+                    hotZoneVisible || hotZoneEditMode ? 'Hide Hot Zone' : 'Show Hot Zone'
+                  }
+                  aria-label={
+                    hotZoneVisible || hotZoneEditMode ? 'Hide Hot Zone' : 'Show Hot Zone'
+                  }
+                  disabled={hotZoneEditMode}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => setHotZoneVisible((current) => !current)}
+                >
+                  HZ
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={`map-icon-control${geofenceLabelsEnabled ? '' : ' map-icon-control--off'}`}
@@ -3811,7 +4375,9 @@ function App() {
             <aside
               className={`geofence-panel admin-geofence-panel${
                 adminGeofencePanelExpanded ? ' admin-geofence-panel--expanded' : ''
-              }${selectedGeofence ? ' admin-geofence-panel--detail-open' : ''}`}
+              }${selectedGeofence && !hotZoneEditMode ? ' admin-geofence-panel--detail-open' : ''}${
+                hotZoneEditMode ? ' admin-geofence-panel--hotzone-edit' : ''
+              }`}
             >
               <button
                 type="button"
@@ -3821,18 +4387,24 @@ function App() {
                 onClick={() => setAdminGeofencePanelExpanded((open) => !open)}
                 aria-label={
                   adminGeofencePanelExpanded
-                    ? 'Hide area details panel'
-                    : 'Show area details panel'
+                    ? hotZoneEditMode
+                      ? 'Hide Hot Zone editor'
+                      : 'Hide area details panel'
+                    : hotZoneEditMode
+                      ? 'Show Hot Zone editor'
+                      : 'Show area details panel'
                 }
               >
                 <div className="admin-geofence-mobile-strip-row">
-                  {adminGeofencePanelExpanded && selectedGeofence ? (
+                  {adminGeofencePanelExpanded && selectedGeofence && !hotZoneEditMode ? (
                     <span
                       className="admin-geofence-mobile-strip-title admin-geofence-mobile-strip-title--spacer"
                       aria-hidden="true"
                     />
                   ) : (
-                    <span className="admin-geofence-mobile-strip-title">{geofenceDetailsTitle}</span>
+                    <span className="admin-geofence-mobile-strip-title">
+                      {hotZoneEditMode ? 'Hot Zone' : geofenceDetailsTitle}
+                    </span>
                   )}
                   <span className="admin-geofence-mobile-strip-chevron" aria-hidden="true">
                     {adminGeofencePanelExpanded ? '▲' : '▼'}
@@ -3840,6 +4412,60 @@ function App() {
                 </div>
               </button>
               <div id="admin-geofence-expandable" className="admin-geofence-expandable">
+                {hotZoneEditMode ? (
+                  <div className="admin-hotzone-edit-panel">
+                    <div className="geofence-panel-header">
+                      <h3>Hot Zone</h3>
+                      <button
+                        type="button"
+                        className="status-button"
+                        onClick={() => setHotZoneEditMode(false)}
+                      >
+                        Done
+                      </button>
+                    </div>
+                    <p className="geofence-panel-lead">
+                      {activeHotZone
+                        ? 'Areas are hidden while you edit. Use the tools on the left to reshape or delete the Hot Zone on the map.'
+                        : 'Areas are hidden while you edit. Click the polygon tool on the left, then draw the Hot Zone on the map.'}
+                    </p>
+                    <label className="admin-hotzone-edit-label" htmlFor="hot-zone-name-draft">
+                      Name
+                    </label>
+                    <input
+                      id="hot-zone-name-draft"
+                      className="admin-hotzone-edit-input"
+                      type="text"
+                      value={hotZoneNameDraft}
+                      onChange={(e) => setHotZoneNameDraft(e.target.value)}
+                      onBlur={() => void persistHotZoneName()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          void persistHotZoneName()
+                        }
+                      }}
+                      placeholder="Hot Zone"
+                    />
+                    {hotZoneMessage ? <p className="access-message">{hotZoneMessage}</p> : null}
+                    {activeHotZone ? (
+                      <button
+                        type="button"
+                        className="status-button admin-hotzone-delete-btn"
+                        onClick={() => {
+                          if (
+                            window.confirm('Delete the Hot Zone? This cannot be undone.')
+                          ) {
+                            void handleHotZoneDeleted(activeHotZone.id)
+                          }
+                        }}
+                      >
+                        Delete Hot Zone
+                      </button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <>
                 {!selectedGeofence ? (
                   <div className="admin-geofence-viewer-filter">
                     <label className="admin-geofence-viewer-filter-label" htmlFor="admin-area-viewer-email-filter">
@@ -4208,6 +4834,8 @@ function App() {
                   </div>
                 )}
                 {geofenceMessage && <p className="access-message">{geofenceMessage}</p>}
+                  </>
+                )}
               </div>
               {showGeofenceDeleteDialog && selectedGeofence && (
                 <div

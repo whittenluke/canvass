@@ -32,6 +32,14 @@ export type GeofenceRow = {
   assigned_email: string | null
 }
 
+/** Active Hot Zone polygon (separate from canvassing geofences). */
+export type HotZoneRow = {
+  id: string
+  name: string
+  geometry: GeoJSON.Polygon
+  is_active: boolean
+}
+
 export type GeofenceRpcRow = {
   id: string
   name: string

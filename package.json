@@ -13,6 +13,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",
     "@turf/boolean-point-in-polygon": "^7.3.5",
+    "@turf/buffer": "^7.3.5",
     "@turf/helpers": "^7.3.5",
     "leaflet": "^1.9.4",
     "leaflet-draw": "^1.0.4",

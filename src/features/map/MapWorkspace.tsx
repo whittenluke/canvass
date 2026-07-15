@@ -3,7 +3,7 @@ import L from 'leaflet'
 import 'leaflet-draw'
 import { useMap, useMapEvents } from 'react-leaflet'
 import { GEOFENCE_LABEL_MIN_ZOOM, VIEWPORT_LIMIT } from '../app/utils'
-import type { GeofenceRow, ViewportBounds } from '../app/types'
+import type { GeofenceRow, HotZoneRow, ViewportBounds } from '../app/types'
 
 type GeofencePolygonLayer = L.Polygon & {
   geofenceId?: string
@@ -213,6 +213,9 @@ export function MapPaneSetup() {
   const map = useMap()
 
   useEffect(() => {
+    const hotZonePane = map.getPane('hotZonePane') ?? map.createPane('hotZonePane')
+    hotZonePane.style.zIndex = '340'
+
     const geofencePane = map.getPane('geofencePane') ?? map.createPane('geofencePane')
     geofencePane.style.zIndex = '350'
 
@@ -512,6 +515,7 @@ export function GeofenceDrawManager({
 
   useEffect(() => {
     const handleCreated = (event: L.DrawEvents.Created) => {
+      if (!enabledRef.current) return
       blockGeofenceClearOnMapClickRef.current = true
       const layer = event.layer as L.Polygon
       const geometry = (layer.toGeoJSON() as GeoJSON.Feature<GeoJSON.Polygon>).geometry
@@ -522,6 +526,7 @@ export function GeofenceDrawManager({
       })
     }
     const handleEdited = (event: L.DrawEvents.Edited) => {
+      if (!enabledRef.current) return
       const updates: Array<{ id: string; geometry: GeoJSON.Polygon }> = []
       event.layers.eachLayer((layer) => {
         const polygon = layer as GeofencePolygonLayer
@@ -532,6 +537,7 @@ export function GeofenceDrawManager({
       if (updates.length > 0) onEditedRef.current(updates)
     }
     const handleDeleted = (event: L.DrawEvents.Deleted) => {
+      if (!enabledRef.current) return
       const ids: string[] = []
       event.layers.eachLayer((layer) => {
         const polygon = layer as GeofencePolygonLayer
@@ -549,6 +555,242 @@ export function GeofenceDrawManager({
       map.off(L.Draw.Event.DELETED, handleDeleted)
     }
   }, [map])
+
+  return null
+}
+
+/** Admin-only: stacks under Leaflet zoom / draw tools so it never covers the geofence icon. */
+export function HotZoneEditModeControl({
+  editMode,
+  onToggle,
+}: {
+  editMode: boolean
+  onToggle: () => void
+}) {
+  const map = useMap()
+  const onToggleRef = useRef(onToggle)
+  onToggleRef.current = onToggle
+
+  useEffect(() => {
+    const Control = L.Control.extend({
+      onAdd() {
+        const container = L.DomUtil.create('div', 'leaflet-bar hot-zone-edit-leaflet-control')
+        const button = L.DomUtil.create('a', '', container) as HTMLAnchorElement
+        button.href = '#'
+        button.role = 'button'
+        button.textContent = 'HZ'
+        button.title = editMode ? 'Exit Hot Zone edit mode' : 'Edit Hot Zone'
+        button.setAttribute(
+          'aria-label',
+          editMode ? 'Exit Hot Zone edit mode' : 'Edit Hot Zone',
+        )
+        button.setAttribute('aria-pressed', editMode ? 'true' : 'false')
+        if (editMode) {
+          L.DomUtil.addClass(button, 'is-active')
+        }
+        L.DomEvent.disableClickPropagation(container)
+        L.DomEvent.on(button, 'click', (e) => {
+          L.DomEvent.preventDefault(e)
+          onToggleRef.current()
+        })
+        return container
+      },
+    })
+    const control = new Control({ position: 'topleft' })
+    map.addControl(control)
+    return () => {
+      map.removeControl(control)
+    }
+  }, [map, editMode])
+
+  return null
+}
+
+const HOT_ZONE_PATH_OPTIONS: L.PathOptions = {
+  color: '#b91c1c',
+  weight: 3,
+  fillColor: '#ef4444',
+  fillOpacity: 0.28,
+  className: 'hot-zone-polygon',
+}
+
+type HotZonePolygonLayer = L.Polygon & {
+  hotZoneId?: string
+  hotZoneStructureKey?: string
+}
+
+function hotZoneLatLngs(zone: HotZoneRow): L.LatLngExpression[] {
+  return zone.geometry.coordinates[0].map(([lng, lat]) => [lat, lng] as [number, number])
+}
+
+function hotZoneStructureKey(zone: HotZoneRow): string {
+  const ring = zone.geometry.coordinates[0] ?? []
+  let coordChecksum = 0
+  for (const pt of ring) {
+    coordChecksum += (pt[0] ?? 0) + (pt[1] ?? 0)
+  }
+  return `${zone.id}:${ring.length}:${coordChecksum.toFixed(6)}:${zone.name}`
+}
+
+/**
+ * Display-only Hot Zone in normal mode (interactive: false).
+ * In editMode: drawable if missing, editable/deletable if present; use instead of geofence draw.
+ */
+export function HotZoneDrawManager({
+  hotZone,
+  visible,
+  editMode,
+  onCreated,
+  onEdited,
+  onDeleted,
+}: {
+  hotZone: HotZoneRow | null
+  /** Show polygon when true (or always while editMode). */
+  visible: boolean
+  editMode: boolean
+  onCreated: (geometry: GeoJSON.Polygon) => void | Promise<void>
+  onEdited: (id: string, geometry: GeoJSON.Polygon) => void | Promise<void>
+  onDeleted: (id: string) => void | Promise<void>
+}) {
+  const map = useMap()
+  const featureGroupRef = useRef<L.FeatureGroup | null>(null)
+  const layerRef = useRef<HotZonePolygonLayer | null>(null)
+  const drawControlRef = useRef<L.Control.Draw | null>(null)
+  const onCreatedRef = useRef(onCreated)
+  const onEditedRef = useRef(onEdited)
+  const onDeletedRef = useRef(onDeleted)
+
+  useEffect(() => {
+    onCreatedRef.current = onCreated
+    onEditedRef.current = onEdited
+    onDeletedRef.current = onDeleted
+  })
+
+  useEffect(() => {
+    if (!featureGroupRef.current) {
+      featureGroupRef.current = new L.FeatureGroup()
+      map.addLayer(featureGroupRef.current)
+    }
+    const group = featureGroupRef.current
+    const show = editMode || visible
+
+    if (!hotZone || !show) {
+      if (layerRef.current) {
+        group.removeLayer(layerRef.current)
+        layerRef.current = null
+      }
+      return
+    }
+
+    const structureKey = hotZoneStructureKey(hotZone)
+    const existing = layerRef.current
+    const needsInteractiveChange = existing && existing.options.interactive !== editMode
+
+    if (!existing || needsInteractiveChange) {
+      if (existing) {
+        group.removeLayer(existing)
+        layerRef.current = null
+      }
+      const layer = L.polygon(hotZoneLatLngs(hotZone), {
+        pane: 'hotZonePane',
+        ...HOT_ZONE_PATH_OPTIONS,
+        interactive: editMode,
+      }) as HotZonePolygonLayer
+      layer.hotZoneId = hotZone.id
+      layer.hotZoneStructureKey = structureKey
+      group.addLayer(layer)
+      layerRef.current = layer
+      return
+    }
+
+    if (existing.hotZoneStructureKey !== structureKey) {
+      existing.setLatLngs(hotZoneLatLngs(hotZone))
+      existing.hotZoneId = hotZone.id
+      existing.hotZoneStructureKey = structureKey
+    }
+    existing.setStyle(HOT_ZONE_PATH_OPTIONS)
+  }, [map, hotZone, visible, editMode])
+
+  useEffect(() => {
+    // Ensure a feature group exists before mounting draw tools (create-first path has no polygon yet).
+    if (!featureGroupRef.current) {
+      featureGroupRef.current = new L.FeatureGroup()
+      map.addLayer(featureGroupRef.current)
+    }
+    const group = featureGroupRef.current
+
+    const removeDrawControl = () => {
+      if (drawControlRef.current) {
+        map.removeControl(drawControlRef.current)
+        drawControlRef.current = null
+      }
+    }
+
+    if (!editMode) {
+      removeDrawControl()
+      return removeDrawControl
+    }
+
+    removeDrawControl()
+    const hasZone = Boolean(hotZone)
+    drawControlRef.current = new L.Control.Draw({
+      draw: {
+        polygon: hasZone ? false : {},
+        rectangle: false,
+        polyline: false,
+        marker: false,
+        circle: false,
+        circlemarker: false,
+      },
+      ...(hasZone
+        ? {
+            edit: {
+              featureGroup: group,
+              edit: {},
+              remove: true,
+            },
+          }
+        : {}),
+    })
+    map.addControl(drawControlRef.current)
+    return removeDrawControl
+  }, [map, editMode, hotZone])
+
+  useEffect(() => {
+    if (!editMode) return
+
+    const handleCreated = (event: L.DrawEvents.Created) => {
+      const layer = event.layer as L.Polygon
+      const geometry = (layer.toGeoJSON() as GeoJSON.Feature<GeoJSON.Polygon>).geometry
+      const group = featureGroupRef.current
+      if (group) group.removeLayer(layer)
+      void onCreatedRef.current(geometry)
+    }
+    const handleEdited = (event: L.DrawEvents.Edited) => {
+      event.layers.eachLayer((layer) => {
+        const polygon = layer as HotZonePolygonLayer
+        if (!polygon.hotZoneId) return
+        const geometry = (polygon.toGeoJSON() as GeoJSON.Feature<GeoJSON.Polygon>).geometry
+        void onEditedRef.current(polygon.hotZoneId, geometry)
+      })
+    }
+    const handleDeleted = (event: L.DrawEvents.Deleted) => {
+      event.layers.eachLayer((layer) => {
+        const polygon = layer as HotZonePolygonLayer
+        if (polygon.hotZoneId) void onDeletedRef.current(polygon.hotZoneId)
+      })
+      layerRef.current = null
+    }
+
+    map.on(L.Draw.Event.CREATED, handleCreated)
+    map.on(L.Draw.Event.EDITED, handleEdited)
+    map.on(L.Draw.Event.DELETED, handleDeleted)
+    return () => {
+      map.off(L.Draw.Event.CREATED, handleCreated)
+      map.off(L.Draw.Event.EDITED, handleEdited)
+      map.off(L.Draw.Event.DELETED, handleDeleted)
+    }
+  }, [map, editMode])
 
   return null
 }

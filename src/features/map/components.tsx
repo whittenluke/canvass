@@ -1,5 +1,7 @@
 export {
   GeofenceDrawManager,
+  HotZoneDrawManager,
+  HotZoneEditModeControl,
   GeofenceChevronLeftIcon,
   GeofenceMarkCanvassedIcon,
   GeofencePencilIcon,
