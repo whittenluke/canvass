@@ -202,6 +202,7 @@ function App() {
   const mapRef = useRef<L.Map | null>(null)
   const [mapReadySequence, setMapReadySequence] = useState(0)
   const [dotsEnabled, setDotsEnabled] = useState(false)
+  const [geofenceLabelsEnabled, setGeofenceLabelsEnabled] = useState(true)
   /** After leaving a selected area (all-areas / map click-out), suppress dots + viewport fetches until zoom-out settles. */
   const [adminExitAreaDetailMapLatch, setAdminExitAreaDetailMapLatch] = useState(false)
   const [addressPopupOpenId, setAddressPopupOpenId] = useState<string | null>(null)
@@ -3227,6 +3228,7 @@ function App() {
                 selectedGeofenceId={selectedGeofenceId}
                 canvasserFocusedGeofenceId={canvasserEffectiveFocusGeofenceId}
                 geofenceAllCanvassedIds={geofenceAllCanvassedIdSet}
+                labelsEnabled={geofenceLabelsEnabled}
                 onCreated={handleGeofenceCreated}
                 onEdited={handleGeofenceEdited}
                 onDeleted={handleGeofenceDeleted}
@@ -3502,18 +3504,32 @@ function App() {
                   )
                 })}
             </MapContainer>
-            <button
-              type="button"
-              className="map-icon-control"
-              title={dotsEnabled ? 'Hide address dots' : 'Show address dots'}
-              aria-label={dotsEnabled ? 'Hide address dots' : 'Show address dots'}
-              onMouseDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => setDotsEnabled((current) => !current)}
-            >
-              {dotsEnabled ? '◉' : '○'}
-            </button>
+            <div className="map-icon-controls">
+              <button
+                type="button"
+                className={`map-icon-control${geofenceLabelsEnabled ? '' : ' map-icon-control--off'}`}
+                title={geofenceLabelsEnabled ? 'Hide area labels' : 'Show area labels'}
+                aria-label={geofenceLabelsEnabled ? 'Hide area labels' : 'Show area labels'}
+                onMouseDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => setGeofenceLabelsEnabled((current) => !current)}
+              >
+                Aa
+              </button>
+              <button
+                type="button"
+                className="map-icon-control"
+                title={dotsEnabled ? 'Hide address dots' : 'Show address dots'}
+                aria-label={dotsEnabled ? 'Hide address dots' : 'Show address dots'}
+                onMouseDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => setDotsEnabled((current) => !current)}
+              >
+                {dotsEnabled ? '◉' : '○'}
+              </button>
+            </div>
             {nearbyAddressSheet && (
               <NearbyAddressSheet
                 members={nearbyAddressSheet.members}

@@ -1063,11 +1063,19 @@
   height: 100%;
 }
 
-.map-icon-control {
+.map-icon-controls {
   position: absolute;
   z-index: 5000;
   top: 12px;
   right: 12px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.map-icon-control {
   width: 36px;
   height: 36px;
   border-radius: 10px;
@@ -1082,6 +1090,11 @@
   pointer-events: auto;
   touch-action: manipulation;
   user-select: none;
+}
+
+.map-icon-control--off {
+  opacity: 0.55;
+  color: #64748b;
 }
 
 .selected-geofence-chip {

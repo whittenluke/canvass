@@ -262,6 +262,7 @@ export function GeofenceDrawManager({
   selectedGeofenceId,
   canvasserFocusedGeofenceId = '',
   geofenceAllCanvassedIds,
+  labelsEnabled = true,
   onCreated,
   onEdited,
   onDeleted,
@@ -275,6 +276,7 @@ export function GeofenceDrawManager({
   canvasserFocusedGeofenceId?: string
   /** Geofence ids where every in-area address is canvassed (total > 0). */
   geofenceAllCanvassedIds?: ReadonlySet<string>
+  labelsEnabled?: boolean
   onCreated: (geometry: GeoJSON.Polygon) => void
   onEdited: (updates: Array<{ id: string; geometry: GeoJSON.Polygon }>) => void
   onDeleted: (ids: string[]) => void | Promise<boolean>
@@ -400,7 +402,7 @@ export function GeofenceDrawManager({
 
   useEffect(() => {
     const syncLabelVisibility = () => {
-      const show = map.getZoom() >= GEOFENCE_LABEL_MIN_ZOOM
+      const show = labelsEnabled && map.getZoom() >= GEOFENCE_LABEL_MIN_ZOOM
       for (const layer of layersByIdRef.current.values()) {
         layer.getTooltip()?.setOpacity(show ? 1 : 0)
       }
@@ -419,7 +421,7 @@ export function GeofenceDrawManager({
       map.off('zoomend', syncLabelVisibility)
       map.off('moveend', syncLabelVisibility)
     }
-  }, [map, geofences])
+  }, [map, geofences, labelsEnabled])
 
   useEffect(() => {
     const block = () => {
