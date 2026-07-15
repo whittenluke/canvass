@@ -687,17 +687,42 @@
   align-items: center;
 }
 
-/* Page scrolls as a whole — avoid a tiny nested address list under the map. */
+/* Full-width scroll surface so gutters outside content still receive wheel scroll. */
 .hotzone-addresses-page {
+  max-width: none;
+  margin: 0;
+  width: 100%;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
 
 .hotzone-addresses-page .canvasser-list-body {
   flex: none;
+  align-self: center;
   min-height: 0;
   overflow: visible;
   padding-bottom: 1.5rem;
+  max-width: 560px;
+  width: 100%;
+}
+
+.hotzone-addresses-page .canvasser-list-toolbar,
+.hotzone-addresses-page .hotzone-addresses-tabs,
+.hotzone-addresses-page .canvasser-list-progress-wrap,
+.hotzone-addresses-page .canvasser-list-empty,
+.hotzone-addresses-page .error-banner,
+.hotzone-addresses-page .access-message {
+  max-width: 920px;
+  width: 100%;
+  align-self: center;
+}
+
+.hotzone-addresses-page .canvasser-list-progress-wrap {
+  margin-bottom: 1rem;
+}
+
+.hotzone-addresses-page .hotzone-addresses-tabs {
+  margin-bottom: 0.85rem;
 }
 
 .hotzone-addresses-tabs {
@@ -750,6 +775,11 @@
 
 .hotzone-addresses-map-wrap {
   position: relative;
+  align-self: center;
+  /* Side gutters so wheel-scroll can hit the page, not only the map. */
+  box-sizing: border-box;
+  width: min(920px, calc(100% - 5.5rem));
+  max-width: 100%;
   margin: 0 0 1rem;
   border: 1px solid #fecaca;
   border-radius: 12px;
@@ -757,6 +787,12 @@
   height: min(52vh, 440px);
   flex-shrink: 0;
   background: #f8fafc;
+}
+
+@media (max-width: 900px) {
+  .hotzone-addresses-map-wrap {
+    width: min(920px, calc(100% - 1.5rem));
+  }
 }
 
 .hotzone-addresses-map-controls {
