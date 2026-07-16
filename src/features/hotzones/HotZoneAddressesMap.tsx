@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CircleMarker,
   MapContainer,
@@ -26,6 +26,12 @@ import {
   sortClustersSinglesFirst,
 } from '../app/utils'
 import { NearbyAddressSheet } from '../canvasser/CanvasserWorkspace'
+import {
+  filterParcelsInBounds,
+  loadHotZoneParcels,
+  PARCEL_RENDER_MIN_ZOOM,
+  type ParcelFeature,
+} from './parcels'
 
 const BOUNDARY_STYLE: L.PathOptions = {
   color: '#b91c1c',
@@ -42,6 +48,14 @@ const BUFFER_STYLE: L.PathOptions = {
   fillOpacity: 0.18,
   interactive: false,
   dashArray: '6 4',
+}
+
+const PARCEL_STYLE: L.PathOptions = {
+  color: '#475569',
+  weight: 1,
+  fillColor: '#94a3b8',
+  fillOpacity: 0.08,
+  interactive: false,
 }
 
 type ClusterBadgeStyle = 'todo' | 'canvassed' | 'petition'
@@ -123,6 +137,85 @@ function ViewportTracker({ onChange }: { onChange: (vp: ViewportBounds) => void 
   return null
 }
 
+/** Parcel outlines for the current viewport (Hot Zone Addresses map only). */
+function ParcelOutlines({ enabled }: { enabled: boolean }) {
+  const map = useMap()
+  const layerRef = useRef<L.GeoJSON | null>(null)
+  const featuresRef = useRef<ParcelFeature[] | null>(null)
+
+  useEffect(() => {
+    if (!enabled) {
+      featuresRef.current = null
+      if (layerRef.current) {
+        map.removeLayer(layerRef.current)
+        layerRef.current = null
+      }
+      return
+    }
+
+    let cancelled = false
+
+    const sync = () => {
+      if (!featuresRef.current) return
+      const zoom = map.getZoom()
+      if (zoom < PARCEL_RENDER_MIN_ZOOM) {
+        layerRef.current?.clearLayers()
+        return
+      }
+      const b = map.getBounds().pad(0.08)
+      const visible = filterParcelsInBounds(
+        { type: 'FeatureCollection', features: featuresRef.current },
+        {
+          west: b.getWest(),
+          south: b.getSouth(),
+          east: b.getEast(),
+          north: b.getNorth(),
+        },
+      )
+      if (!layerRef.current) {
+        if (!map.getPane('parcelPane')) {
+          const pane = map.createPane('parcelPane')
+          pane.style.zIndex = '350'
+        }
+        layerRef.current = L.geoJSON(undefined, {
+          style: PARCEL_STYLE,
+          interactive: false,
+          pane: 'parcelPane',
+        }).addTo(map)
+      }
+      layerRef.current.clearLayers()
+      layerRef.current.addData({
+        type: 'FeatureCollection',
+        features: visible,
+      } as GeoJSON.FeatureCollection)
+    }
+
+    void loadHotZoneParcels().then((collection) => {
+      if (cancelled || !collection) return
+      featuresRef.current = collection.features.filter(
+        (f): f is ParcelFeature =>
+          f.geometry?.type === 'Polygon' || f.geometry?.type === 'MultiPolygon',
+      )
+      sync()
+    })
+
+    map.on('moveend', sync)
+    map.on('zoomend', sync)
+
+    return () => {
+      cancelled = true
+      map.off('moveend', sync)
+      map.off('zoomend', sync)
+      if (layerRef.current) {
+        map.removeLayer(layerRef.current)
+        layerRef.current = null
+      }
+    }
+  }, [enabled, map])
+
+  return null
+}
+
 function ringToLatLngs(geometry: GeoJSON.Polygon): L.LatLngExpression[] {
   return (geometry.coordinates[0] ?? []).map(([lng, lat]) => [lat, lng] as [number, number])
 }
@@ -175,6 +268,7 @@ export function HotZoneAddressesMap({
 }) {
   const [openPopupId, setOpenPopupId] = useState<string | null>(null)
   const [outsideDotsEnabled, setOutsideDotsEnabled] = useState(true)
+  const [parcelsEnabled, setParcelsEnabled] = useState(true)
   const [mapViewport, setMapViewport] = useState<ViewportBounds | null>(null)
   const [clusterSheetMembers, setClusterSheetMembers] = useState<AddressRow[] | null>(null)
 
@@ -229,6 +323,19 @@ export function HotZoneAddressesMap({
       <div className="hotzone-addresses-map-controls">
         <button
           type="button"
+          className={`map-icon-control${parcelsEnabled ? '' : ' map-icon-control--off'}`}
+          title={parcelsEnabled ? 'Hide parcels' : 'Show parcels'}
+          aria-label={parcelsEnabled ? 'Hide parcels' : 'Show parcels'}
+          aria-pressed={parcelsEnabled}
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => setParcelsEnabled((current) => !current)}
+        >
+          ▦
+        </button>
+        <button
+          type="button"
           className={`map-icon-control${outsideDotsEnabled ? '' : ' map-icon-control--off'}`}
           title={
             outsideDotsEnabled
@@ -253,11 +360,13 @@ export function HotZoneAddressesMap({
         center={center}
         zoom={14}
         scrollWheelZoom
+        preferCanvas
         className="hotzone-addresses-map"
         attributionControl={false}
       >
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
         <ViewportTracker onChange={setMapViewport} />
+        <ParcelOutlines enabled={parcelsEnabled} />
         <FitToPolygons boundary={boundary} bufferGeometry={bufferGeometry} />
         {bufferGeometry ? (
           <Polygon positions={ringToLatLngs(bufferGeometry)} pathOptions={BUFFER_STYLE} />

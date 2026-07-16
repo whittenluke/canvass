@@ -27,3 +27,8 @@ dist-ssr
 documentation/
 .env.local
 .netlify
+
+# Full county parcel dump (~300MB). Regenerate clipped file with:
+#   npm run clip:parcels
+Data/*.geojson
+Data/*.zip
